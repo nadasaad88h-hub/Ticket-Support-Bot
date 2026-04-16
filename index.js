@@ -15,20 +15,14 @@ const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
 
-// ================= ROLES =================
 const SUPPORT_ROLES = [
   "Support Agency",
   "Support Agency High Command"
 ];
 
-// ================= STATE =================
 let ticketCount = 0;
+const tickets = new Map();
 
-// store ticket metadata in memory
-const tickets = new Map(); 
-// channelId → { ownerId, type, status }
-
-// ================= CLIENT =================
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers]
 });
@@ -44,17 +38,25 @@ client.once("ready", async () => {
 
     new SlashCommandBuilder()
       .setName("close")
-      .setDescription("Close a ticket (vote system)"),
+      .setDescription("Close a ticket with voting"),
 
     new SlashCommandBuilder()
       .setName("add")
       .setDescription("Add user to ticket")
-      .addUserOption(o => o.setName("user").setRequired(true)),
+      .addUserOption(o =>
+        o.setName("user")
+         .setDescription("User to add")
+         .setRequired(true)
+      ),
 
     new SlashCommandBuilder()
       .setName("remove")
       .setDescription("Remove user from ticket")
-      .addUserOption(o => o.setName("user").setRequired(true)),
+      .addUserOption(o =>
+        o.setName("user")
+         .setDescription("User to remove")
+         .setRequired(true)
+      ),
 
     new SlashCommandBuilder()
       .setName("pending")
@@ -63,26 +65,35 @@ client.once("ready", async () => {
     new SlashCommandBuilder()
       .setName("accepted")
       .setDescription("Accept ticket")
-      .addStringOption(o => o.setName("reason").setRequired(true)),
+      .addStringOption(o =>
+        o.setName("reason")
+         .setDescription("Reason for accepting")
+         .setRequired(true)
+      ),
 
     new SlashCommandBuilder()
       .setName("denied")
       .setDescription("Deny ticket")
-      .addStringOption(o => o.setName("reason").setRequired(true)),
+      .addStringOption(o =>
+        o.setName("reason")
+         .setDescription("Reason for denying")
+         .setRequired(true)
+      ),
 
     new SlashCommandBuilder()
       .setName("move")
       .setDescription("Move ticket type")
       .addStringOption(o =>
         o.setName("type")
-          .setRequired(true)
-          .addChoices(
-            { name: "Report Ticket", value: "Report Ticket" },
-            { name: "Appeal Ticket", value: "Appeal Ticket" },
-            { name: "Department Report Ticket", value: "Department Report Ticket" },
-            { name: "Department Appeal Ticket", value: "Department Appeal Ticket" },
-            { name: "Bug Ticket", value: "Bug Ticket" }
-          )
+         .setDescription("New ticket type")
+         .setRequired(true)
+         .addChoices(
+           { name: "Report Ticket", value: "Report Ticket" },
+           { name: "Appeal Ticket", value: "Appeal Ticket" },
+           { name: "Department Report Ticket", value: "Department Report Ticket" },
+           { name: "Department Appeal Ticket", value: "Department Appeal Ticket" },
+           { name: "Bug Ticket", value: "Bug Ticket" }
+         )
       )
   ].map(c => c.toJSON());
 
@@ -96,20 +107,18 @@ client.once("ready", async () => {
   console.log("Slash commands registered.");
 });
 
-// ================= HELPERS =================
+// ================= HELPER =================
 function isSupport(member) {
-  return member.roles.cache.some(r =>
-    SUPPORT_ROLES.includes(r.name)
-  );
+  return member.roles.cache.some(r => SUPPORT_ROLES.includes(r.name));
 }
 
-// ================= PANEL =================
+// ================= COMMANDS =================
 client.on("interactionCreate", async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
-  const { commandName, member, channel } = interaction;
+  const { commandName, member, channel, guild } = interaction;
 
-  // ================= PANEL =================
+  // PANEL
   if (commandName === "panel") {
     const embed = new EmbedBuilder()
       .setTitle("TICKET CATEGORY:")
@@ -127,29 +136,18 @@ client.on("interactionCreate", async interaction => {
     return interaction.reply({ embeds: [embed], components: [row] });
   }
 
-  // ================= CLOSE COMMAND =================
-  if (commandName === "close") {
-    const ticket = tickets.get(channel.id);
-    if (!ticket) return interaction.reply({ content: "Not a ticket.", ephemeral: true });
+  const ticket = tickets.get(channel.id);
 
-    await channel.setName(`🔴 Closing ${ticketCount}`);
-
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("close_accept").setLabel("Accept").setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId("close_deny").setLabel("Deny").setStyle(ButtonStyle.Danger)
-    );
-
-    return interaction.reply({
-      content: `Close!\n${member} wants to close this ticket.\n\nTicket Owner vs Support Team vote required.`,
-      components: [row]
-    });
+  if (!ticket) {
+    return interaction.reply({ content: "This is not a ticket.", ephemeral: true });
   }
 
-  // ================= ADD =================
+  // ADD
   if (commandName === "add") {
     if (!isSupport(member)) return interaction.reply({ content: "No permission", ephemeral: true });
 
     const user = interaction.options.getUser("user");
+
     await channel.permissionOverwrites.edit(user.id, {
       ViewChannel: true,
       SendMessages: true,
@@ -159,63 +157,80 @@ client.on("interactionCreate", async interaction => {
     return interaction.reply(`Added ${user}`);
   }
 
-  // ================= REMOVE =================
+  // REMOVE
   if (commandName === "remove") {
     if (!isSupport(member)) return interaction.reply({ content: "No permission", ephemeral: true });
 
     const user = interaction.options.getUser("user");
+
     await channel.permissionOverwrites.delete(user.id);
 
     return interaction.reply(`Removed ${user}`);
   }
 
-  // ================= PENDING =================
+  // PENDING
   if (commandName === "pending") {
     if (!isSupport(member)) return interaction.reply({ content: "No permission", ephemeral: true });
 
+    ticket.status = "pending";
     await channel.setName(`🟡 Pending ${ticketCount}`);
+
     return interaction.reply("Marked pending");
   }
 
-  // ================= ACCEPTED =================
+  // ACCEPTED
   if (commandName === "accepted") {
     if (!isSupport(member)) return interaction.reply({ content: "No permission", ephemeral: true });
 
     const reason = interaction.options.getString("reason");
+
+    ticket.status = "accepted";
     await channel.setName(`🟢 Accepted ${ticketCount}`);
 
     return interaction.reply(`Accepted Reason: ${reason}`);
   }
 
-  // ================= DENIED =================
+  // DENIED
   if (commandName === "denied") {
     if (!isSupport(member)) return interaction.reply({ content: "No permission", ephemeral: true });
 
     const reason = interaction.options.getString("reason");
+
+    ticket.status = "denied";
     await channel.setName(`🔴 Denied ${ticketCount}`);
 
     return interaction.reply(`Denied Reason: ${reason}`);
   }
 
-  // ================= MOVE =================
+  // MOVE
   if (commandName === "move") {
     if (!isSupport(member)) return interaction.reply({ content: "No permission", ephemeral: true });
 
-    const type = interaction.options.getString("type");
-
-    const ticket = tickets.get(channel.id);
-    if (!ticket) return interaction.reply("Not a ticket");
-
-    if (ticket.status && ["pending", "accepted", "denied"].includes(ticket.status)) {
+    if (["pending", "accepted", "denied"].includes(ticket.status)) {
       return interaction.reply("Cannot move finalized ticket.");
     }
 
-    ticket.type = type;
-    tickets.set(channel.id, ticket);
+    const type = interaction.options.getString("type");
 
+    ticket.type = type;
     await channel.setName(`${type} ${ticketCount}`);
 
     return interaction.reply(`Moved to ${type}`);
+  }
+
+  // CLOSE
+  if (commandName === "close") {
+    await channel.setName(`🔴 Closing ${ticketCount}`);
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("close_accept").setLabel("Accept").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("close_deny").setLabel("Deny").setStyle(ButtonStyle.Danger)
+    );
+
+    return interaction.reply({
+      content: `Close!\n${member} wants to close this ticket.`,
+      components: [row]
+    });
   }
 });
 
@@ -225,7 +240,6 @@ client.on("interactionCreate", async interaction => {
 
   const { guild, member, channel } = interaction;
 
-  // ================= CREATE TICKET =================
   const types = {
     report: "Report Ticket",
     appeal: "Appeal Ticket",
@@ -234,6 +248,7 @@ client.on("interactionCreate", async interaction => {
     bug: "Bug Ticket"
   };
 
+  // CREATE TICKET
   if (types[interaction.customId]) {
     ticketCount++;
 
@@ -263,29 +278,26 @@ client.on("interactionCreate", async interaction => {
       status: "open"
     });
 
-    const embed = new EmbedBuilder()
-      .setTitle(`Ticket Category: ${type}`)
-      .setDescription(`Dear ${member}, please follow format instructions.`)
-      .setColor(0x00aeff);
-
     return interaction.reply({ content: `Created ${ticketChannel}`, ephemeral: true });
   }
 
-  // ================= CLOSE VOTE =================
   const ticket = tickets.get(channel.id);
   if (!ticket) return;
 
   const isOwner = member.id === ticket.ownerId;
   const isStaff = isSupport(member);
 
-  if (!isOwner && !isStaff) return interaction.reply({ content: "No permission", ephemeral: true });
+  if (!isOwner && !isStaff) {
+    return interaction.reply({ content: "No permission", ephemeral: true });
+  }
 
+  // CLOSE ACCEPT
   if (interaction.customId === "close_accept") {
-    ticketCount--;
     tickets.delete(channel.id);
     return channel.delete();
   }
 
+  // CLOSE DENY
   if (interaction.customId === "close_deny") {
     return interaction.reply("Close denied.");
   }
