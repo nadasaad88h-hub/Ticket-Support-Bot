@@ -22,75 +22,10 @@ const SUPPORT_ROLE_1 = "1494277529614159893";
 const SUPPORT_ROLE_2 = "1494277209668456539";
 
 const TICKET_TYPES = [
-  {
-    id: "report",
-    label: "Report Ticket",
-    emoji: "🚨",
-    color: 0xed4245,
-    message: `Dear {user MENTION},
-
-To request for assistance, we kindly request you to follow the format below.
-
-*Your username:
-Your rank:
-Their username:
-Rule Violated:
-
-Evidence:*`,
-  },
-  {
-    id: "appeal",
-    label: "Appeal Ticket",
-    emoji: "⚖️",
-    color: 0xfee75c,
-    message: `Dear {user MENTION},
-
-To request for assistance, we kindly request you to follow the format below.
-
-Your username:
-Your rank:
-Infraction:
-Appeal message:`,
-  },
-  {
-    id: "bug",
-    label: "Bug Ticket",
-    emoji: "🐛",
-    color: 0x57f287,
-    message: `Dear {user MENTION},
-
-To request for assistance, we kindly request you to follow the format below.
-
-*Your username:
-Your rank:
-Server Bug:
-How’s it’s affecting the server:
-
-Evidence (optional):*`,
-  },
+  { id: "report", label: "Report", emoji: "📄", color: 0xed4245, message: "Dear {user MENTION},\n\n*Your username:\nYour rank:\nTheir username:\nRule Violated:\n\nEvidence:*" },
+  { id: "appeal", label: "Appeal", emoji: "⚖️", color: 0xfee75c, message: "Dear {user MENTION},\n\nYour username:\nYour rank:\nInfraction:\nAppeal message:" },
+  { id: "bug", label: "Bug", emoji: "🐞", color: 0x57f287, message: "Dear {user MENTION},\n\n*Your username:\nYour rank:\nServer Bug:\nHow’s it’s affecting the server:\n\nEvidence (optional):*" }
 ];
-
-const commands = [
-  new SlashCommandBuilder().setName("panel").setDescription("Send ticket panel").setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
-  new SlashCommandBuilder().setName("close").setDescription("Close ticket"),
-  new SlashCommandBuilder().setName("pending").setDescription("Mark pending"),
-  new SlashCommandBuilder().setName("accepted").setDescription("Mark accepted"),
-  new SlashCommandBuilder().setName("denied").setDescription("Mark denied"),
-  new SlashCommandBuilder().setName("add").setDescription("Add user").addUserOption(o => o.setName("user").setDescription("User").setRequired(true)),
-  new SlashCommandBuilder().setName("remove").setDescription("Remove user").addUserOption(o => o.setName("user").setDescription("User").setRequired(true)),
-  new SlashCommandBuilder().setName("move").setDescription("Move ticket").addChannelOption(o => o.setName("category").setDescription("Category").setRequired(true).addChannelTypes(ChannelType.GuildCategory)),
-].map(c => c.toJSON());
-
-function isStaff(member) {
-  return member.permissions.has(PermissionFlagsBits.Administrator)
-    || member.roles.cache.has(SUPPORT_ROLE_1)
-    || member.roles.cache.has(SUPPORT_ROLE_2);
-}
-
-// Fixed to check for prefix since we aren't using a fixed category ID anymore
-function isTicket(channel) {
-  return TICKET_TYPES.some(t => channel.name.startsWith(`${t.id}-`));
-}
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
@@ -98,118 +33,76 @@ const client = new Client({
 
 client.once("ready", async () => {
   const rest = new REST({ version: "10" }).setToken(TOKEN);
+  const commands = [
+    new SlashCommandBuilder().setName("panel").setDescription("Send panel").setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+    new SlashCommandBuilder().setName("close").setDescription("Close ticket")
+  ].map(c => c.toJSON());
+  
   try {
     await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands });
-    console.log(`✅ Bot Online: ${client.user.tag}`);
-  } catch (err) { console.error(err); }
+    console.log("✅ Bot is live and commands are synced!");
+  } catch (e) { console.error(e); }
 });
 
 client.on("interactionCreate", async (interaction) => {
-  const { commandName, customId, guild, channel, member, user } = interaction;
-
-  if (interaction.isChatInputCommand()) {
-    if (commandName === "panel") {
-      const row = new ActionRowBuilder().addComponents(
-        TICKET_TYPES.map(t => new ButtonBuilder().setCustomId(`create_${t.id}`).setLabel(t.label).setEmoji(t.emoji).setStyle(ButtonStyle.Secondary))
-      );
-      return interaction.reply({ content: "**Support System Selection**", components: [row] });
-    }
-
-    if (["close","pending","accepted","denied","add","remove","move"].includes(commandName)) {
-      if (!isTicket(channel)) return interaction.reply({ content: "🚨 This command can only be executed inside a ticket!", ephemeral: true });
-      if (["pending","accepted","denied","move"].includes(commandName) && !isStaff(member)) return interaction.reply({ content: "🚨 Staff only.", ephemeral: true });
-
-      if (commandName === "close") {
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId("confirm_close").setLabel("Confirm").setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId("deny_close").setLabel("Deny").setStyle(ButtonStyle.Danger)
-        );
-        return interaction.reply({ 
-            embeds: [new EmbedBuilder().setTitle("Close!").setDescription(`${user} wants to close this ticket!`)],
-            components: [row] 
-        });
-      }
-
-      if (commandName === "pending") return interaction.reply("📌 Ticket is now **PENDING**.");
-      if (commandName === "accepted") return interaction.reply("✅ Ticket **ACCEPTED**.");
-      if (commandName === "denied") return interaction.reply("❌ Ticket **DENIED**.");
-      if (commandName === "add") {
-        const u = interaction.options.getMember("user");
-        await channel.permissionOverwrites.edit(u.id, { ViewChannel: true, SendMessages: true });
-        return interaction.reply(`Added ${u}`);
-      }
-      if (commandName === "remove") {
-        const u = interaction.options.getMember("user");
-        await channel.permissionOverwrites.edit(u.id, { ViewChannel: false });
-        return interaction.reply(`Removed ${u}`);
-      }
-      if (commandName === "move") {
-        const cat = interaction.options.getChannel("category");
-        await channel.setParent(cat.id, { lockPermissions: false });
-        return interaction.reply({ content: `# This Ticket has been moved to a ${cat.name}` });
-      }
-    }
+  if (interaction.isChatInputCommand() && interaction.commandName === "panel") {
+    const row = new ActionRowBuilder().addComponents(
+      TICKET_TYPES.map(t => new ButtonBuilder().setCustomId(`create_${t.id}`).setLabel(t.label).setEmoji(t.emoji).setStyle(ButtonStyle.Secondary))
+    );
+    return interaction.reply({ content: "**TICKET CATEGORY:**\nNeed support? Select a ticket here!", components: [row] });
   }
 
-  if (interaction.isButton()) {
-    if (customId.startsWith("create_")) {
+  if (interaction.isButton() && interaction.customId.startsWith("create_")) {
+    try {
+      // 1. IMMEDIATELY tell Discord we are working (Stops "Interaction Failed")
       await interaction.deferReply({ ephemeral: true });
-      const typeId = customId.split("_")[1];
+
+      const typeId = interaction.customId.split("_")[1];
       const type = TICKET_TYPES.find(t => t.id === typeId);
 
-      // Look for a category named "Tickets" automatically
-      const targetCategory = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === "tickets");
+      // 2. Find "Tickets" category
+      const category = interaction.guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === "tickets");
 
-      const existing = guild.channels.cache.find(c => c.name === `${typeId}-${user.username.toLowerCase().replace(/\s+/g, '-')}`);
-      if (existing) return interaction.editReply(`🚨 You already have a ticket: ${existing}`);
-
-      const ticketChannel = await guild.channels.create({
-        name: `${typeId}-${user.username}`,
+      // 3. Create the channel
+      const ticketChannel = await interaction.guild.channels.create({
+        name: `${typeId}-${interaction.user.username}`,
         type: ChannelType.GuildText,
-        parent: targetCategory ? targetCategory.id : null, // Uses the "Tickets" category if it exists
+        parent: category ? category.id : null,
         permissionOverwrites: [
-          { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-          { id: user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles] },
+          { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+          { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
           { id: SUPPORT_ROLE_1, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
           { id: SUPPORT_ROLE_2, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
         ],
       });
 
-      const embed = new EmbedBuilder().setColor(type.color).setDescription(type.message.replace("{user MENTION}", `<@${user.id}>`));
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId("claim_ticket").setLabel("Claim").setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId("close_prompt").setLabel("Close").setStyle(ButtonStyle.Danger)
+      const embed = new EmbedBuilder().setColor(type.color).setDescription(type.message.replace("{user MENTION}", `<@${interaction.user.id}>`));
+      const buttons = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId("claim").setLabel("Claim").setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId("close").setLabel("Close").setStyle(ButtonStyle.Danger)
       );
 
-      await ticketChannel.send({ content: `<@${user.id}>`, embeds: [embed], components: [row] });
-      return interaction.editReply(`Ticket opened: ${ticketChannel}`);
-    }
+      await ticketChannel.send({ content: `<@${interaction.user.id}>`, embeds: [embed], components: [buttons] });
+      return interaction.editReply(`✅ Ticket created: ${ticketChannel}`);
 
-    if (customId === "claim_ticket") {
-      if (!isStaff(member)) return interaction.reply({ content: "🚨You do not have required authorization to claim this ticket!", ephemeral: true });
-      return interaction.reply(`This ticket has been claimed by ${user}.`);
+    } catch (err) {
+      console.error("ERROR CREATING TICKET:", err);
+      return interaction.editReply("❌ Failed to create ticket. Make sure the bot has 'Manage Channels' permissions!");
     }
+  }
 
-    if (customId === "close_prompt") {
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId("confirm_close").setLabel("Confirm").setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId("deny_close").setLabel("Deny").setStyle(ButtonStyle.Danger)
-        );
-        return interaction.reply({ 
-            embeds: [new EmbedBuilder().setTitle("Close!").setDescription(`${user} wants to close this ticket!`)],
-            components: [row] 
-        });
+  // Handle Close Button
+  if (interaction.isButton() && interaction.customId === "close") {
+    await interaction.reply("Ticket closing in 5 seconds...");
+    setTimeout(() => interaction.channel.delete().catch(() => {}), 5000);
+  }
+  
+  // Handle Claim Button
+  if (interaction.isButton() && interaction.customId === "claim") {
+    if (!interaction.member.roles.cache.has(SUPPORT_ROLE_1) && !interaction.member.roles.cache.has(SUPPORT_ROLE_2)) {
+      return interaction.reply({ content: "🚨You do not have required authorization to claim this ticket!", ephemeral: true });
     }
-
-    if (customId === "confirm_close") {
-        await interaction.reply("Ticket will be deleted in 5 seconds.");
-        setTimeout(() => channel.delete().catch(() => {}), 5000);
-    }
-
-    if (customId === "deny_close") {
-        await interaction.message.delete().catch(() => {});
-        return interaction.reply({ content: `${user} has denied to close this ticket.` });
-    }
+    return interaction.reply(`This ticket has been claimed by <@${interaction.user.id}>.`);
   }
 });
 
