@@ -26,14 +26,9 @@ const PANEL_ROLE = "Unbreakilo";
 // ================= STATE =================
 let ticketCount = 0;
 
-const tickets = new Map();
+const tickets = new Map(); // channelId -> ticket data
+const userTickets = new Map(); // user -> type tracking
 const closeVotes = new Map();
-const claimedTickets = new Map();
-const userTickets = new Map();
-
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers]
-});
 
 // ================= HELPERS =================
 function isSupport(member) {
@@ -44,28 +39,11 @@ function canUsePanel(member) {
   return member.roles.cache.some(r => r.name === PANEL_ROLE);
 }
 
-// FIXED TICKET DETECTION
-function isTicketChannel(channel) {
-  if (!channel) return false;
-
-  if (tickets.has(channel.id)) return true;
-
-  const name = (channel.name || "").toLowerCase();
-
-  return (
-    name.includes("ticket") ||
-    name.includes("report") ||
-    name.includes("appeal") ||
-    name.includes("bug") ||
-    name.includes("dept") ||
-    name.includes("pending") ||
-    name.includes("accepted") ||
-    name.includes("denied") ||
-    name.includes("closing")
-  );
+function isTicket(channel) {
+  return tickets.has(channel.id);
 }
 
-// ================= YOUR EXACT MESSAGES (UNCHANGED CONTENT) =================
+// ================= YOUR EXACT MESSAGES (UNCHANGED) =================
 const TICKET_MESSAGES = {
   "Report Ticket": `## Ticket Category: Report Ticket
 Dear {user, MENTION},
@@ -127,57 +105,50 @@ Evidence (optional):*`
 };
 
 // ================= READY =================
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers]
+});
+
 client.once("ready", async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
   const commands = [
     new SlashCommandBuilder().setName("panel").setDescription("Send ticket panel"),
-    new SlashCommandBuilder().setName("close").setDescription("Close ticket"),
 
-    new SlashCommandBuilder()
-      .setName("add")
-      .setDescription("Add user")
-      .addUserOption(o => o.setName("user").setDescription("User").setRequired(true)),
+    new SlashCommandBuilder().setName("add")
+      .setDescription("Add user to ticket")
+      .addUserOption(o => o.setName("user").setRequired(true)),
 
-    new SlashCommandBuilder()
-      .setName("remove")
-      .setDescription("Remove user")
-      .addUserOption(o => o.setName("user").setDescription("User").setRequired(true)),
+    new SlashCommandBuilder().setName("remove")
+      .setDescription("Remove user from ticket")
+      .addUserOption(o => o.setName("user").setRequired(true)),
 
-    new SlashCommandBuilder().setName("pending").setDescription("Mark pending"),
+    new SlashCommandBuilder().setName("pending"),
+    
+    new SlashCommandBuilder().setName("accepted")
+      .addStringOption(o => o.setName("reason").setRequired(true)),
 
-    new SlashCommandBuilder()
-      .setName("accepted")
-      .setDescription("Accept ticket")
-      .addStringOption(o => o.setName("reason").setDescription("Reason").setRequired(true)),
+    new SlashCommandBuilder().setName("denied")
+      .addStringOption(o => o.setName("reason").setRequired(true)),
 
-    new SlashCommandBuilder()
-      .setName("denied")
-      .setDescription("Deny ticket")
-      .addStringOption(o => o.setName("reason").setDescription("Reason").setRequired(true)),
-
-    new SlashCommandBuilder()
-      .setName("move")
-      .setDescription("Move ticket")
+    new SlashCommandBuilder().setName("move")
       .addStringOption(o =>
         o.setName("type")
-          .setDescription("Ticket type")
           .setRequired(true)
           .addChoices(
             { name: "Report Ticket", value: "Report Ticket" },
             { name: "Appeal Ticket", value: "Appeal Ticket" },
-            { name: "Department Report Ticket", value: "Department Report Ticket" },
-            { name: "Department Appeal Ticket", value: "Department Appeal Ticket" },
+            { name: "Department Report", value: "Department Report Ticket" },
+            { name: "Department Appeal", value: "Department Appeal Ticket" },
             { name: "Bug Ticket", value: "Bug Ticket" }
           )
-      )
+      ),
+
+    new SlashCommandBuilder().setName("close")
   ].map(c => c.toJSON());
 
   const rest = new REST({ version: "10" }).setToken(TOKEN);
-
-  await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), {
-    body: commands
-  });
+  await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands });
 
   console.log("Commands registered");
 });
@@ -188,11 +159,9 @@ client.on("interactionCreate", async interaction => {
 
   const { commandName, member, channel } = interaction;
 
-  // PANEL
   if (commandName === "panel") {
-    if (!canUsePanel(member)) {
-      return interaction.reply({ content: "No permission.", ephemeral: true });
-    }
+    if (!canUsePanel(member))
+      return interaction.reply({ content: "No permission", ephemeral: true });
 
     const embed = new EmbedBuilder()
       .setTitle("TICKET CATEGORY:")
@@ -210,8 +179,7 @@ client.on("interactionCreate", async interaction => {
     return interaction.reply({ embeds: [embed], components: [row] });
   }
 
-  // SAFE CHECK
-  if (!isTicketChannel(channel) && commandName !== "panel") {
+  if (!isTicket(channel)) {
     return interaction.reply({
       content: "🚨 This command can only be executed inside a ticket!",
       ephemeral: true
@@ -220,32 +188,69 @@ client.on("interactionCreate", async interaction => {
 
   const ticket = tickets.get(channel.id);
 
-  const reply = (msg) =>
+  const safeReply = (msg) =>
     interaction.reply({ content: msg, ephemeral: true });
 
-  // ================= COMMANDS =================
-  if (commandName === "pending") {
-    if (!isSupport(member)) return reply("No permission");
-    await channel.setName(`🟡 Pending ${ticketCount}`);
-    return reply("Marked pending");
+  // ADD
+  if (commandName === "add") {
+    if (!isSupport(member)) return safeReply("No permission");
+
+    const user = interaction.options.getUser("user");
+    await channel.permissionOverwrites.edit(user.id, {
+      ViewChannel: true,
+      SendMessages: true,
+      ReadMessageHistory: true
+    });
+
+    return safeReply("User added");
   }
 
+  // REMOVE
+  if (commandName === "remove") {
+    if (!isSupport(member)) return safeReply("No permission");
+
+    const user = interaction.options.getUser("user");
+    await channel.permissionOverwrites.delete(user.id);
+
+    return safeReply("User removed");
+  }
+
+  // PENDING
+  if (commandName === "pending") {
+    if (!isSupport(member)) return safeReply("No permission");
+    await channel.setName(`🟡 Pending ${ticketCount}`);
+    return safeReply("Marked pending");
+  }
+
+  // ACCEPT
   if (commandName === "accepted") {
-    if (!isSupport(member)) return reply("No permission");
+    if (!isSupport(member)) return safeReply("No permission");
+
     const reason = interaction.options.getString("reason");
     await channel.setName(`🟢 Accepted ${ticketCount}`);
-    return reply(`Accepted: ${reason}`);
+
+    return interaction.reply({
+      content: `Accepted: ${reason}`,
+      ephemeral: false
+    });
   }
 
+  // DENY
   if (commandName === "denied") {
-    if (!isSupport(member)) return reply("No permission");
+    if (!isSupport(member)) return safeReply("No permission");
+
     const reason = interaction.options.getString("reason");
     await channel.setName(`🔴 Denied ${ticketCount}`);
-    return reply(`Denied: ${reason}`);
+
+    return interaction.reply({
+      content: `Denied: ${reason}`,
+      ephemeral: false
+    });
   }
 
+  // MOVE
   if (commandName === "move") {
-    if (!isSupport(member)) return reply("No permission");
+    if (!isSupport(member)) return safeReply("No permission");
 
     const type = interaction.options.getString("type");
 
@@ -254,15 +259,26 @@ client.on("interactionCreate", async interaction => {
     const msg = await channel.messages.fetch(ticket.messageId).catch(() => null);
     if (msg) await msg.edit(`# This Ticket has been moved to a ${type}`);
 
-    return reply(`Moved to ${type}`);
+    return safeReply(`Moved to ${type}`);
+  }
+
+  // CLOSE (simple stable version)
+  if (commandName === "close") {
+    const isOwner = member.id === ticket.ownerId;
+    const isStaff = isSupport(member);
+
+    if (!isOwner && !isStaff)
+      return safeReply("No permission");
+
+    await channel.delete();
   }
 });
 
-// ================= BUTTONS =================
+// ================= BUTTON SYSTEM =================
 client.on("interactionCreate", async interaction => {
   if (!interaction.isButton()) return;
 
-  const { guild, member, channel } = interaction;
+  const { member, channel, guild } = interaction;
 
   const types = {
     report: "Report Ticket",
@@ -275,17 +291,6 @@ client.on("interactionCreate", async interaction => {
   // CREATE TICKET
   if (types[interaction.customId]) {
     const type = types[interaction.customId];
-    const userId = member.id;
-
-    if (!userTickets.has(userId)) userTickets.set(userId, {});
-    const existing = userTickets.get(userId);
-
-    if (existing[type]) {
-      return interaction.reply({
-        content: `🚫 You already have an open **${type}** ticket!`,
-        ephemeral: true
-      });
-    }
 
     ticketCount++;
 
@@ -294,13 +299,18 @@ client.on("interactionCreate", async interaction => {
       topic: "ticket"
     });
 
-    // 🔥 YOUR MESSAGE (RESTORED)
     const template = TICKET_MESSAGES[type];
 
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("claim")
+        .setLabel("Claim")
+        .setStyle(ButtonStyle.Success)
+    );
+
     const msg = await channelCreated.send({
-      content: template
-        ? template.replace("{user, MENTION}", `<@${member.id}>`)
-        : "Ticket created."
+      content: template.replace("{user, MENTION}", `<@${member.id}>`),
+      components: [row]
     });
 
     tickets.set(channelCreated.id, {
@@ -309,12 +319,32 @@ client.on("interactionCreate", async interaction => {
       messageId: msg.id
     });
 
-    existing[type] = channelCreated.id;
-    userTickets.set(userId, existing);
+    if (!userTickets.has(member.id)) userTickets.set(member.id, {});
+    userTickets.get(member.id)[type] = true;
 
     return interaction.reply({
       content: `Ticket created: ${channelCreated}`,
       ephemeral: true
+    });
+  }
+
+  // CLAIM
+  if (interaction.customId === "claim") {
+    if (!isSupport(member)) {
+      return interaction.reply({
+        content: "🚨 You do not have required authorization to claim this ticket!",
+        ephemeral: true
+      });
+    }
+
+    await interaction.deferUpdate();
+
+    return channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setDescription(`This ticket has been claimed by ${member}.`)
+          .setColor(0x2b2d31)
+      ]
     });
   }
 });
