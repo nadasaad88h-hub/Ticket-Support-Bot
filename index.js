@@ -47,7 +47,6 @@ const commands = [
   new SlashCommandBuilder().setName("move").setDescription("Move the ticket to another category").addChannelOption(o => o.setName("category").setDescription("Target category").setRequired(true).addChannelTypes(ChannelType.GuildCategory)),
 ].map(c => c.toJSON());
 
-// ───────── HELPERS ─────────
 const isSupport = (m) => m.roles.cache.has(SUPPORT_ROLE_ID) || m.roles.cache.has(HIGH_COMMAND_ROLE_ID) || m.permissions.has(PermissionFlagsBits.Administrator);
 const isUnbreakilo = (m) => m.roles.cache.some(r => r.name === UNBREAKILO_ROLE_NAME);
 const isTicket = (c) => TICKET_TYPES.some(t => c.name.toLowerCase().includes(t.prefix.toLowerCase()));
@@ -79,7 +78,6 @@ client.on("interactionCreate", async (interaction) => {
       if (!isTicket(channel)) return interaction.reply({ content: "🚨 This command can only be used inside a ticket channel!", ephemeral: true });
       
       const isOwner = channel.topic === user.id;
-      
       if (commandName === "close") {
           if (!isSupport(member) && !isOwner && !isUnbreakilo(member)) return interaction.reply({ content: "🚨 You do not have permission to manage this ticket.", ephemeral: true });
       } else {
@@ -99,17 +97,20 @@ client.on("interactionCreate", async (interaction) => {
         return interaction.reply({ embeds: [embed], components: [row] });
       }
 
-      // FIXED STATUS RENAMING LOGIC
+      // ───────── ULTIMATE NO-MIX RENAMING ─────────
       if (["pending", "accepted", "denied"].includes(commandName)) {
         let emoji, status;
         if (commandName === "pending") { emoji = "🟡"; status = "Pending"; }
         if (commandName === "accepted") { emoji = "🟢"; status = "Accepted"; }
         if (commandName === "denied") { emoji = "🔴"; status = "Denied"; }
 
-        // This regex removes ANY previous emoji/status prefix from the start of the name
-        const cleanName = channel.name.replace(/^(🟡|🟢|🔴)\s(Pending|Accepted|Denied)_/gi, "");
-        
-        await channel.setName(`${emoji} ${status}_${cleanName}`);
+        // Logic: Find the underscore. Everything after the underscore is the original ticket name.
+        let nameParts = channel.name.split("_");
+        // If there are multiple parts, take the last ones to ensure we don't keep old statuses
+        let baseTicketName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : channel.name;
+
+        // Force the new name: EMOJI STATUS_ORIGINALNAME
+        await channel.setName(`${emoji} ${status}_${baseTicketName}`);
         return interaction.reply({ content: `✅ Ticket status updated to **${status.toUpperCase()}**.`, ephemeral: true });
       }
 
@@ -134,7 +135,7 @@ client.on("interactionCreate", async (interaction) => {
       const cat = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === "tickets");
 
       const tChan = await guild.channels.create({
-        name: `${type.prefix}-${ticketCount++}`,
+        name: `Ticket_${type.prefix}-${ticketCount++}`, // Added "Ticket_" as a separator for the split logic
         type: ChannelType.GuildText,
         parent: cat ? cat.id : null,
         topic: user.id,
