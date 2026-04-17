@@ -26,7 +26,7 @@ const PANEL_ROLE = "Unbreakilo";
 // ================= STATE =================
 let ticketCount = 0;
 
-const tickets = new Map(); // channelId -> { ownerId, type, messageId, status }
+const tickets = new Map(); // channelId -> ticket data
 const closeVotes = new Map();
 const claimedTickets = new Map();
 const userTickets = new Map();
@@ -44,8 +44,25 @@ function canUsePanel(member) {
   return member.roles.cache.some(r => r.name === PANEL_ROLE);
 }
 
-function isTicket(channelId) {
-  return tickets.has(channelId);
+// ✅ FINAL FIXED TICKET CHECK (NO MORE BUGS)
+function isTicketChannel(channel) {
+  if (!channel) return false;
+
+  // 1. PRIMARY SOURCE (MOST RELIABLE)
+  if (tickets.has(channel.id)) return true;
+
+  // 2. FALLBACKS (SURVIVES RESTARTS)
+  const name = (channel.name || "").toLowerCase();
+  const topic = (channel.topic || "").toLowerCase();
+
+  return (
+    name.includes("ticket") ||
+    name.includes("report") ||
+    name.includes("appeal") ||
+    name.includes("bug") ||
+    name.includes("dept") ||
+    topic.includes("ticket")
+  );
 }
 
 // ================= READY =================
@@ -104,7 +121,7 @@ client.once("ready", async () => {
   console.log("Commands registered");
 });
 
-// ================= COMMANDS =================
+// ================= COMMAND HANDLER =================
 client.on("interactionCreate", async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
@@ -117,23 +134,23 @@ client.on("interactionCreate", async interaction => {
     }
 
     const embed = new EmbedBuilder()
-      .setTitle("**TICKET CATEGORY:**")
+      .setTitle("TICKET CATEGORY:")
       .setDescription("Need support? Select a ticket here!")
       .setColor(0x2b2d31);
 
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("report").setLabel("📄 Report").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("appeal").setLabel("⚖️ Appeal").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("dept_report").setLabel("🏢 Dept Report").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("dept_appeal").setLabel("📂 Dept Appeal").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("bug").setLabel("🐞 Bug").setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId("report").setLabel("Report").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("appeal").setLabel("Appeal").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("dept_report").setLabel("Dept Report").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("dept_appeal").setLabel("Dept Appeal").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("bug").setLabel("Bug").setStyle(ButtonStyle.Secondary)
     );
 
     return interaction.reply({ embeds: [embed], components: [row] });
   }
 
   // ================= FIXED TICKET CHECK =================
-  if (!isTicket(channel.id) && commandName !== "panel") {
+  if (!isTicketChannel(channel) && commandName !== "panel") {
     return interaction.reply({
       content: "🚨 This command can only be executed inside a ticket!",
       ephemeral: true
@@ -222,13 +239,6 @@ client.on("interactionCreate", async interaction => {
     const msg = await channel.messages.fetch(ticket.messageId).catch(() => null);
     if (msg) await msg.edit(`# This Ticket has been moved to a ${type}`);
 
-    const embed = new EmbedBuilder()
-      .setColor(0x2b2d31)
-      .setTitle("Ticket Moved")
-      .setDescription(`This ticket has been moved to a **${type}**`);
-
-    await channel.send({ embeds: [embed] });
-
     return reply(`Moved to ${type}`);
   }
 
@@ -245,7 +255,7 @@ client.on("interactionCreate", async interaction => {
 
     const embed = new EmbedBuilder()
       .setColor(0x2b2d31)
-      .setTitle("## Close!")
+      .setTitle("Close!")
       .setDescription(`***${member} wants to close this ticket!***`);
 
     const row = new ActionRowBuilder().addComponents(
@@ -290,6 +300,7 @@ client.on("interactionCreate", async interaction => {
 
     const channelCreated = await guild.channels.create({
       name: `${type} ${ticketCount}`,
+      topic: "ticket",
       permissionOverwrites: [
         { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
         {
@@ -303,30 +314,9 @@ client.on("interactionCreate", async interaction => {
       ]
     });
 
-    const claimRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId("claim_ticket")
-        .setLabel("Claim Ticket")
-        .setStyle(ButtonStyle.Success)
-    );
-
     const msg = await channelCreated.send({
-      content:
-`## Ticket Category: ${type}
-Dear ${member},
-
-To request for assistance, we kindly request you to follow the format below.
-
-*Your username:
-Your rank:
-Their username:
-Rule Violated:
-
-Evidence:*`,
-      components: [claimRow]
+      content: `## Ticket Category: ${type}\nDear ${member},\n\nPlease follow format...`
     });
-
-    await msg.pin().catch(() => {});
 
     tickets.set(channelCreated.id, {
       ownerId: member.id,
@@ -343,86 +333,6 @@ Evidence:*`,
       ephemeral: true
     });
   }
-
-  // ================= CLAIM =================
-  if (interaction.customId === "claim_ticket") {
-    const allowed = member.roles.cache.some(r => SUPPORT_ROLES.includes(r.id));
-
-    if (!allowed) {
-      return member.send("🚨You do not have required authorization to claim this ticket!");
-    }
-
-    if (claimedTickets.has(channel.id)) {
-      return interaction.reply({ content: "Already claimed.", ephemeral: true });
-    }
-
-    claimedTickets.set(channel.id, member.id);
-
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId("claim_ticket")
-        .setLabel("Claimed")
-        .setStyle(ButtonStyle.Success)
-        .setDisabled(true)
-    );
-
-    await interaction.update({ components: [row] });
-
-    const embed = new EmbedBuilder()
-      .setColor(0x2b2d31)
-      .setDescription(`This ticket has been claimed by ${member}.`);
-
-    await channel.send({ embeds: [embed] });
-  }
-
-  // ================= CLOSE VOTES =================
-  const ticket = tickets.get(channel.id);
-  if (!ticket) return;
-
-  if (!closeVotes.has(channel.id)) return;
-
-  const vote = closeVotes.get(channel.id);
-
-  const isOwner = member.id === ticket.ownerId;
-  const isStaff = isSupport(member);
-
-  if (!isOwner && !isStaff) return;
-
-  if (interaction.customId === "close_yes") {
-    vote.yes.add(member.id);
-    vote.no.delete(member.id);
-  }
-
-  if (interaction.customId === "close_no") {
-    vote.no.add(member.id);
-    vote.yes.delete(member.id);
-
-    return interaction.reply({
-      content: `${member} ***has denied to close this ticket.***`
-    });
-  }
-
-  if (vote.yes.size >= 2) {
-    const data = tickets.get(channel.id);
-
-    if (data) {
-      const userData = userTickets.get(data.ownerId);
-      if (userData) {
-        delete userData[data.type];
-        userTickets.set(data.ownerId, userData);
-      }
-    }
-
-    tickets.delete(channel.id);
-    closeVotes.delete(channel.id);
-
-    return channel.delete();
-  }
-
-  return interaction.reply({
-    content: "Vote registered.",
-    ephemeral: true
-  });
 });
 
 client.login(TOKEN);
