@@ -17,8 +17,8 @@ const GUILD_ID = process.env.GUILD_ID;
 
 // SUPPORT ROLE IDS
 const SUPPORT_ROLES = [
-  "1494277529614159893", // Support Agency
-  "1494277209668456539"  // Support Agency High Command
+  "1494277529614159893",
+  "1494277209668456539"
 ];
 
 const PANEL_ROLE = "Unbreakilo";
@@ -127,16 +127,21 @@ client.on("interactionCreate", async interaction => {
     return interaction.reply({ embeds: [embed], components: [row] });
   }
 
-  // BLOCK OUTSIDE TICKETS
-  if (!isTicketChannel(channel.id)) {
-    return interaction.reply({ content: "Use inside tickets only.", ephemeral: true });
+  // ================= SAFE TICKET CHECK =================
+  if (!isTicketChannel(channel.id) && commandName !== "panel") {
+    return interaction.reply({
+      content: "Use inside tickets only.",
+      ephemeral: true
+    });
   }
 
   const ticket = tickets.get(channel.id);
 
   // ================= ADD =================
   if (commandName === "add") {
-    if (!isSupport(member)) return interaction.reply({ content: "No permission", ephemeral: true });
+    if (!isSupport(member)) {
+      return interaction.reply({ content: "No permission", ephemeral: true });
+    }
 
     const user = interaction.options.getUser("user");
 
@@ -146,56 +151,90 @@ client.on("interactionCreate", async interaction => {
       ReadMessageHistory: true
     });
 
-    return interaction.reply(`Added ${user}`);
+    return interaction.reply({ content: `Added ${user}`, ephemeral: true });
   }
 
   // ================= REMOVE =================
   if (commandName === "remove") {
-    if (!isSupport(member)) return interaction.reply({ content: "No permission", ephemeral: true });
+    if (!isSupport(member)) {
+      return interaction.reply({ content: "No permission", ephemeral: true });
+    }
 
     const user = interaction.options.getUser("user");
 
     await channel.permissionOverwrites.delete(user.id);
 
-    return interaction.reply(`Removed ${user}`);
+    return interaction.reply({ content: `Removed ${user}`, ephemeral: true });
   }
 
   // ================= PENDING =================
   if (commandName === "pending") {
-    if (!isSupport(member)) return interaction.reply({ content: "No permission", ephemeral: true });
+    if (!isSupport(member)) {
+      return interaction.reply({ content: "No permission", ephemeral: true });
+    }
 
     await channel.setName(`🟡 Pending ${ticketCount}`);
-    return interaction.reply("Marked pending");
+
+    return interaction.reply({ content: "Marked pending", ephemeral: true });
   }
 
   // ================= ACCEPTED =================
   if (commandName === "accepted") {
-    if (!isSupport(member)) return interaction.reply({ content: "No permission", ephemeral: true });
+    if (!isSupport(member)) {
+      return interaction.reply({ content: "No permission", ephemeral: true });
+    }
 
     const reason = interaction.options.getString("reason");
 
     await channel.setName(`🟢 Accepted ${ticketCount}`);
-    return interaction.reply(`Accepted: ${reason}`);
+
+    return interaction.reply({
+      content: `Accepted: ${reason}`,
+      ephemeral: true
+    });
   }
 
   // ================= DENIED =================
   if (commandName === "denied") {
-    if (!isSupport(member)) return interaction.reply({ content: "No permission", ephemeral: true });
+    if (!isSupport(member)) {
+      return interaction.reply({ content: "No permission", ephemeral: true });
+    }
 
     const reason = interaction.options.getString("reason");
 
     await channel.setName(`🔴 Denied ${ticketCount}`);
-    return interaction.reply(`Denied: ${reason}`);
+
+    return interaction.reply({
+      content: `Denied: ${reason}`,
+      ephemeral: true
+    });
   }
 
   // ================= MOVE =================
   if (commandName === "move") {
-    if (!isSupport(member)) return interaction.reply({ content: "No permission", ephemeral: true });
+    if (!isSupport(member)) {
+      return interaction.reply({ content: "No permission", ephemeral: true });
+    }
 
     const type = interaction.options.getString("type");
 
     await channel.setName(`${type} ${ticketCount}`);
-    return interaction.reply(`Moved to ${type}`);
+
+    const ticketData = tickets.get(channel.id);
+    if (!ticketData) {
+      return interaction.reply({ content: "Ticket data missing.", ephemeral: true });
+    }
+
+    const msg = await channel.messages.fetch(ticketData.messageId).catch(() => null);
+
+    if (msg) {
+      await msg.edit(`# *This Ticket has been moved to a ${type}*`);
+    }
+
+    return interaction.reply({
+      content: `Moved to ${type}`,
+      ephemeral: true
+    });
   }
 
   // ================= CLOSE =================
@@ -204,7 +243,7 @@ client.on("interactionCreate", async interaction => {
     const isStaff = isSupport(member);
 
     if (!isOwner && !isStaff) {
-      return interaction.reply({ content: "No permission.", ephemeral: true });
+      return interaction.reply({ content: "No permission", ephemeral: true });
     }
 
     await channel.setName(`🔴 Closing ${ticketCount}`);
@@ -235,7 +274,7 @@ client.on("interactionCreate", async interaction => {
     bug: "Bug Ticket"
   };
 
-  // CREATE TICKET
+  // ================= CREATE TICKET =================
   if (types[interaction.customId]) {
     ticketCount++;
 
@@ -255,13 +294,6 @@ client.on("interactionCreate", async interaction => {
         }
       ]
     });
-
-    tickets.set(channel.id, {
-      ownerId: member.id,
-      type
-    });
-
-    // ================= YOUR EXACT MESSAGES =================
 
     let msg;
 
@@ -343,12 +375,21 @@ Evidence (optional):*`
       );
     }
 
-    if (msg) await msg.pin().catch(() => {});
+    await msg.pin().catch(() => {});
 
-    return interaction.reply({ content: `Ticket created: ${channel}`, ephemeral: true });
+    tickets.set(channel.id, {
+      ownerId: member.id,
+      type,
+      messageId: msg.id
+    });
+
+    return interaction.reply({
+      content: `Ticket created: ${channel}`,
+      ephemeral: true
+    });
   }
 
-  // CLOSE BUTTONS
+  // ================= CLOSE BUTTONS =================
   const ticket = tickets.get(interaction.channel.id);
   if (!ticket) return;
 
