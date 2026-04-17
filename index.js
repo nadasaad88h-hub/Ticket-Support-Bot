@@ -30,7 +30,6 @@ const tickets = new Map(); // channelId -> { ownerId, type, messageId }
 const closeVotes = new Map(); // channelId -> { yes:Set, no:Set }
 const claimedTickets = new Map(); // channelId -> userId
 
-// ================= CLIENT =================
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers]
 });
@@ -142,9 +141,12 @@ client.on("interactionCreate", async interaction => {
 
   const ticket = tickets.get(channel.id);
 
-  // ================= ADD =================
+  // ================= ALL STAFF COMMANDS =================
+  const staffOnlyReply = (msg) =>
+    interaction.reply({ content: msg, ephemeral: true });
+
   if (commandName === "add") {
-    if (!isSupport(member)) return interaction.reply({ content: "No permission", ephemeral: true });
+    if (!isSupport(member)) return staffOnlyReply("No permission");
 
     const user = interaction.options.getUser("user");
 
@@ -154,74 +156,59 @@ client.on("interactionCreate", async interaction => {
       ReadMessageHistory: true
     });
 
-    return interaction.reply({ content: `Added ${user}`, ephemeral: true });
+    return staffOnlyReply(`Added ${user}`);
   }
 
-  // ================= REMOVE =================
   if (commandName === "remove") {
-    if (!isSupport(member)) return interaction.reply({ content: "No permission", ephemeral: true });
+    if (!isSupport(member)) return staffOnlyReply("No permission");
 
     const user = interaction.options.getUser("user");
 
     await channel.permissionOverwrites.delete(user.id);
 
-    return interaction.reply({ content: `Removed ${user}`, ephemeral: true });
+    return staffOnlyReply(`Removed ${user}`);
   }
 
-  // ================= PENDING =================
   if (commandName === "pending") {
-    if (!isSupport(member)) return interaction.reply({ content: "No permission", ephemeral: true });
+    if (!isSupport(member)) return staffOnlyReply("No permission");
 
     await channel.setName(`🟡 Pending ${ticketCount}`);
-
-    return interaction.reply({ content: "Marked pending", ephemeral: true });
+    return staffOnlyReply("Marked pending");
   }
 
-  // ================= ACCEPT =================
   if (commandName === "accepted") {
-    if (!isSupport(member)) return interaction.reply({ content: "No permission", ephemeral: true });
+    if (!isSupport(member)) return staffOnlyReply("No permission");
 
     const reason = interaction.options.getString("reason");
 
     await channel.setName(`🟢 Accepted ${ticketCount}`);
 
-    return interaction.reply({
-      content: `Accepted: ${reason}`,
-      ephemeral: true
-    });
+    return staffOnlyReply(`Accepted: ${reason}`);
   }
 
-  // ================= DENY =================
   if (commandName === "denied") {
-    if (!isSupport(member)) return interaction.reply({ content: "No permission", ephemeral: true });
+    if (!isSupport(member)) return staffOnlyReply("No permission");
 
     const reason = interaction.options.getString("reason");
 
     await channel.setName(`🔴 Denied ${ticketCount}`);
 
-    return interaction.reply({
-      content: `Denied: ${reason}`,
-      ephemeral: true
-    });
+    return staffOnlyReply(`Denied: ${reason}`);
   }
 
   // ================= MOVE =================
   if (commandName === "move") {
-    if (!isSupport(member)) return interaction.reply({ content: "No permission", ephemeral: true });
+    if (!isSupport(member)) return staffOnlyReply("No permission");
 
     const type = interaction.options.getString("type");
 
     await channel.setName(`${type} ${ticketCount}`);
 
     const ticketData = tickets.get(channel.id);
-    if (!ticketData) {
-      return interaction.reply({ content: "Ticket data missing.", ephemeral: true });
-    }
 
-    const msg = await channel.messages.fetch(ticketData.messageId).catch(() => null);
-
-    if (msg) {
-      await msg.edit(`# This Ticket has been moved to a ${type}`);
+    if (ticketData) {
+      const msg = await channel.messages.fetch(ticketData.messageId).catch(() => null);
+      if (msg) await msg.edit(`# This Ticket has been moved to a ${type}`);
     }
 
     const embed = new EmbedBuilder()
@@ -231,10 +218,7 @@ client.on("interactionCreate", async interaction => {
 
     await channel.send({ embeds: [embed] });
 
-    return interaction.reply({
-      content: `Moved to ${type}`,
-      ephemeral: true
-    });
+    return staffOnlyReply(`Moved to ${type}`);
   }
 
   // ================= CLOSE =================
@@ -242,9 +226,7 @@ client.on("interactionCreate", async interaction => {
     const isOwner = member.id === ticket.ownerId;
     const isStaff = isSupport(member);
 
-    if (!isOwner && !isStaff) {
-      return interaction.reply({ content: "No permission", ephemeral: true });
-    }
+    if (!isOwner && !isStaff) return staffOnlyReply("No permission");
 
     await channel.setName(`🔴 Closing ${ticketCount}`);
 
@@ -271,7 +253,7 @@ client.on("interactionCreate", async interaction => {
   }
 });
 
-// ================= BUTTONS =================
+// ================= BUTTON HANDLER =================
 client.on("interactionCreate", async interaction => {
   if (!interaction.isButton()) return;
 
@@ -306,89 +288,6 @@ client.on("interactionCreate", async interaction => {
       ]
     });
 
-    let msg;
-
-    if (type === "Report Ticket") {
-      msg = await channelCreated.send(
-`## Ticket Category: Report Ticket
-Dear ${member},
-
-To request for assistance, we kindly request you to follow the format below.
-
-*Your username:
-Your rank:
-Their username:
-Rule Violated:
-
-Evidence:*`
-      );
-    }
-
-    if (type === "Appeal Ticket") {
-      msg = await channelCreated.send(
-`## Ticket Category: Appeal Ticket
-Dear ${member},
-
-To request for assistance, we kindly request you to follow the format below.
-
-*Your username:
-Your rank:
-Infraction:
-Appeal message:*`
-      );
-    }
-
-    if (type === "Department Report Ticket") {
-      msg = await channelCreated.send(
-`## Ticket Category: Department Report Ticket
-Dear ${member},
-
-To request for assistance, we kindly request you to follow the format below.
-
-*Your username:
-Your rank:
-Their username:
-Their department:
-Rule Violated:
-
-Evidence:*`
-      );
-    }
-
-    if (type === "Department Appeal Ticket") {
-      msg = await channelCreated.send(
-`## Ticket Category: Department Appeal Ticket
-Dear ${member},
-
-To request for assistance, we kindly request you to follow the format below.
-
-*Your username:
-Your department:
-infraction:
-
-Appeal message:*`
-      );
-    }
-
-    if (type === "Bug Ticket") {
-      msg = await channelCreated.send(
-`## Ticket Category: Bug Ticket
-Dear ${member},
-
-To request for assistance, we kindly request you to follow the format below.
-
-*Your username:
-Your rank:
-Server Bug:
-How’s it’s affecting the server:
-
-Evidence (optional):*`
-      );
-    }
-
-    await msg.pin().catch(() => {});
-
-    // CLAIM BUTTON
     const claimRow = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId("claim_ticket")
@@ -396,16 +295,28 @@ Evidence (optional):*`
         .setStyle(ButtonStyle.Success)
     );
 
-    const claimMsg = await channelCreated.send({
-      content: "Click below to claim this ticket.",
+    const msg = await channelCreated.send({
+      content:
+`## Ticket Category: ${type}
+Dear ${member},
+
+To request for assistance, we kindly request you to follow the format below.
+
+*Your username:
+Your rank:
+Their username:
+Rule Violated:
+
+Evidence:*`,
       components: [claimRow]
     });
+
+    await msg.pin().catch(() => {});
 
     tickets.set(channelCreated.id, {
       ownerId: member.id,
       type,
-      messageId: msg.id,
-      claimMessageId: claimMsg.id
+      messageId: msg.id
     });
 
     return interaction.reply({
@@ -416,9 +327,7 @@ Evidence (optional):*`
 
   // ================= CLAIM =================
   if (interaction.customId === "claim_ticket") {
-    const allowed = member.roles.cache.some(r =>
-      SUPPORT_ROLES.includes(r.id)
-    );
+    const allowed = member.roles.cache.some(r => SUPPORT_ROLES.includes(r.id));
 
     if (!allowed) {
       return member.send("🚨You do not have required authorization to claim this ticket!");
@@ -438,7 +347,7 @@ Evidence (optional):*`
         .setDisabled(true)
     );
 
-    await interaction.update({ components: [row] });
+    return interaction.update({ components: [row] });
   }
 
   // ================= CLOSE VOTES =================
@@ -455,13 +364,13 @@ Evidence (optional):*`
   if (!isOwner && !isStaff) return;
 
   if (interaction.customId === "close_yes") {
-    vote.no.delete(member.id);
     vote.yes.add(member.id);
+    vote.no.delete(member.id);
   }
 
   if (interaction.customId === "close_no") {
-    vote.yes.delete(member.id);
     vote.no.add(member.id);
+    vote.yes.delete(member.id);
 
     return interaction.reply({
       content: `${member} ***has denied to close this ticket.***`
@@ -475,7 +384,7 @@ Evidence (optional):*`
   }
 
   return interaction.reply({
-    content: `Vote registered.`,
+    content: "Vote registered.",
     ephemeral: true
   });
 });
