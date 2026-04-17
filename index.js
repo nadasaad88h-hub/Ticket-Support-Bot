@@ -44,16 +44,13 @@ function canUsePanel(member) {
   return member.roles.cache.some(r => r.name === PANEL_ROLE);
 }
 
-// ✅ FINAL FIXED TICKET CHECK (NO MORE BUGS)
+// ✅ SAFE TICKET DETECTION (NO BREAKING AFTER RESTART)
 function isTicketChannel(channel) {
   if (!channel) return false;
 
-  // 1. PRIMARY SOURCE (MOST RELIABLE)
   if (tickets.has(channel.id)) return true;
 
-  // 2. FALLBACKS (SURVIVES RESTARTS)
   const name = (channel.name || "").toLowerCase();
-  const topic = (channel.topic || "").toLowerCase();
 
   return (
     name.includes("ticket") ||
@@ -61,7 +58,10 @@ function isTicketChannel(channel) {
     name.includes("appeal") ||
     name.includes("bug") ||
     name.includes("dept") ||
-    topic.includes("ticket")
+    name.includes("pending") ||
+    name.includes("accepted") ||
+    name.includes("denied") ||
+    name.includes("closing")
   );
 }
 
@@ -139,17 +139,17 @@ client.on("interactionCreate", async interaction => {
       .setColor(0x2b2d31);
 
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("report").setLabel("Report").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("appeal").setLabel("Appeal").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("dept_report").setLabel("Dept Report").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("dept_appeal").setLabel("Dept Appeal").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("bug").setLabel("Bug").setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId("report").setStyle(ButtonStyle.Secondary).setLabel("Report"),
+      new ButtonBuilder().setCustomId("appeal").setStyle(ButtonStyle.Secondary).setLabel("Appeal"),
+      new ButtonBuilder().setCustomId("dept_report").setStyle(ButtonStyle.Secondary).setLabel("Dept Report"),
+      new ButtonBuilder().setCustomId("dept_appeal").setStyle(ButtonStyle.Secondary).setLabel("Dept Appeal"),
+      new ButtonBuilder().setCustomId("bug").setStyle(ButtonStyle.Secondary).setLabel("Bug")
     );
 
     return interaction.reply({ embeds: [embed], components: [row] });
   }
 
-  // ================= FIXED TICKET CHECK =================
+  // ================= SAFE TICKET CHECK =================
   if (!isTicketChannel(channel) && commandName !== "panel") {
     return interaction.reply({
       content: "🚨 This command can only be executed inside a ticket!",
@@ -192,34 +192,25 @@ client.on("interactionCreate", async interaction => {
   if (commandName === "pending") {
     if (!isSupport(member)) return reply("No permission");
 
-    ticket.status = "pending";
-    tickets.set(channel.id, ticket);
-
     await channel.setName(`🟡 Pending ${ticketCount}`);
     return reply("Marked pending");
   }
 
-  // ================= ACCEPT =================
+  // ================= ACCEPTED =================
   if (commandName === "accepted") {
     if (!isSupport(member)) return reply("No permission");
 
     const reason = interaction.options.getString("reason");
 
-    ticket.status = "accepted";
-    tickets.set(channel.id, ticket);
-
     await channel.setName(`🟢 Accepted ${ticketCount}`);
     return reply(`Accepted: ${reason}`);
   }
 
-  // ================= DENY =================
+  // ================= DENIED =================
   if (commandName === "denied") {
     if (!isSupport(member)) return reply("No permission");
 
     const reason = interaction.options.getString("reason");
-
-    ticket.status = "denied";
-    tickets.set(channel.id, ticket);
 
     await channel.setName(`🔴 Denied ${ticketCount}`);
     return reply(`Denied: ${reason}`);
@@ -230,9 +221,6 @@ client.on("interactionCreate", async interaction => {
     if (!isSupport(member)) return reply("No permission");
 
     const type = interaction.options.getString("type");
-
-    ticket.type = type;
-    tickets.set(channel.id, ticket);
 
     await channel.setName(`${type} ${ticketCount}`);
 
@@ -254,9 +242,9 @@ client.on("interactionCreate", async interaction => {
     closeVotes.set(channel.id, { yes: new Set(), no: new Set() });
 
     const embed = new EmbedBuilder()
-      .setColor(0x2b2d31)
       .setTitle("Close!")
-      .setDescription(`***${member} wants to close this ticket!***`);
+      .setDescription(`***${member} wants to close this ticket!***`)
+      .setColor(0x2b2d31);
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId("close_yes").setLabel("Confirm").setStyle(ButtonStyle.Success),
@@ -281,7 +269,7 @@ client.on("interactionCreate", async interaction => {
     bug: "Bug Ticket"
   };
 
-  // ================= CREATE =================
+  // ================= CREATE TICKET =================
   if (types[interaction.customId]) {
     const type = types[interaction.customId];
     const userId = member.id;
@@ -315,14 +303,13 @@ client.on("interactionCreate", async interaction => {
     });
 
     const msg = await channelCreated.send({
-      content: `## Ticket Category: ${type}\nDear ${member},\n\nPlease follow format...`
+      content: "Ticket created."
     });
 
     tickets.set(channelCreated.id, {
       ownerId: member.id,
       type,
-      messageId: msg.id,
-      status: "open"
+      messageId: msg.id
     });
 
     existing[type] = channelCreated.id;
