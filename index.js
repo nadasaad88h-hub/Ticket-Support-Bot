@@ -29,6 +29,7 @@ let ticketCount = 0;
 const tickets = new Map(); // channelId -> { ownerId, type, messageId }
 const closeVotes = new Map(); // channelId -> { yes:Set, no:Set }
 const claimedTickets = new Map(); // channelId -> userId
+const userTickets = new Map(); // userId -> { type: channelId }
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers]
@@ -182,7 +183,6 @@ client.on("interactionCreate", async interaction => {
     const reason = interaction.options.getString("reason");
 
     await channel.setName(`🟢 Accepted ${ticketCount}`);
-
     return staffReply(`Accepted: ${reason}`);
   }
 
@@ -192,7 +192,6 @@ client.on("interactionCreate", async interaction => {
     const reason = interaction.options.getString("reason");
 
     await channel.setName(`🔴 Denied ${ticketCount}`);
-
     return staffReply(`Denied: ${reason}`);
   }
 
@@ -267,11 +266,25 @@ client.on("interactionCreate", async interaction => {
     bug: "Bug Ticket"
   };
 
-  // ================= CREATE TICKET =================
+  // ================= LIMIT CHECK =================
   if (types[interaction.customId]) {
-    ticketCount++;
-
     const type = types[interaction.customId];
+    const userId = member.id;
+
+    if (!userTickets.has(userId)) {
+      userTickets.set(userId, {});
+    }
+
+    const existing = userTickets.get(userId);
+
+    if (existing[type]) {
+      return interaction.reply({
+        content: `🚫 You already have an open **${type}** ticket!`,
+        ephemeral: true
+      });
+    }
+
+    ticketCount++;
 
     const channelCreated = await guild.channels.create({
       name: `${type} ${ticketCount}`,
@@ -319,6 +332,9 @@ Evidence:*`,
       messageId: msg.id
     });
 
+    existing[type] = channelCreated.id;
+    userTickets.set(userId, existing);
+
     return interaction.reply({
       content: `Ticket created: ${channelCreated}`,
       ephemeral: true
@@ -349,7 +365,6 @@ Evidence:*`,
 
     await interaction.update({ components: [row] });
 
-    // ✅ FINAL CLAIM EMBED
     const claimEmbed = new EmbedBuilder()
       .setColor(0x2b2d31)
       .setDescription(`This ticket has been claimed by ${member}.`);
@@ -385,8 +400,20 @@ Evidence:*`,
   }
 
   if (vote.yes.size >= 2) {
+    const ticketData = tickets.get(channel.id);
+
+    if (ticketData) {
+      const userData = userTickets.get(ticketData.ownerId);
+
+      if (userData) {
+        delete userData[ticketData.type];
+        userTickets.set(ticketData.ownerId, userData);
+      }
+    }
+
     tickets.delete(channel.id);
     closeVotes.delete(channel.id);
+
     return channel.delete();
   }
 
