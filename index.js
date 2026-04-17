@@ -15,7 +15,7 @@ const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
 
-// SUPPORT ROLE IDS
+// SUPPORT ROLES
 const SUPPORT_ROLES = [
   "1494277529614159893",
   "1494277209668456539"
@@ -78,7 +78,7 @@ client.once("ready", async () => {
       .setDescription("Move ticket")
       .addStringOption(o =>
         o.setName("type")
-          .setDescription("Type")
+          .setDescription("Ticket type")
           .setRequired(true)
           .addChoices(
             { name: "Report Ticket", value: "Report Ticket" },
@@ -99,11 +99,11 @@ client.once("ready", async () => {
   console.log("Commands registered");
 });
 
-// ================= COMMANDS =================
+// ================= COMMAND HANDLER =================
 client.on("interactionCreate", async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
-  const { commandName, member, channel, guild } = interaction;
+  const { commandName, member, channel } = interaction;
 
   // ================= PANEL =================
   if (commandName === "panel") {
@@ -127,7 +127,7 @@ client.on("interactionCreate", async interaction => {
     return interaction.reply({ embeds: [embed], components: [row] });
   }
 
-  // ================= SAFE TICKET CHECK =================
+  // ================= BLOCK OUTSIDE TICKETS =================
   if (!isTicketChannel(channel.id) && commandName !== "panel") {
     return interaction.reply({
       content: "Use inside tickets only.",
@@ -139,9 +139,7 @@ client.on("interactionCreate", async interaction => {
 
   // ================= ADD =================
   if (commandName === "add") {
-    if (!isSupport(member)) {
-      return interaction.reply({ content: "No permission", ephemeral: true });
-    }
+    if (!isSupport(member)) return interaction.reply({ content: "No permission", ephemeral: true });
 
     const user = interaction.options.getUser("user");
 
@@ -156,9 +154,7 @@ client.on("interactionCreate", async interaction => {
 
   // ================= REMOVE =================
   if (commandName === "remove") {
-    if (!isSupport(member)) {
-      return interaction.reply({ content: "No permission", ephemeral: true });
-    }
+    if (!isSupport(member)) return interaction.reply({ content: "No permission", ephemeral: true });
 
     const user = interaction.options.getUser("user");
 
@@ -169,9 +165,7 @@ client.on("interactionCreate", async interaction => {
 
   // ================= PENDING =================
   if (commandName === "pending") {
-    if (!isSupport(member)) {
-      return interaction.reply({ content: "No permission", ephemeral: true });
-    }
+    if (!isSupport(member)) return interaction.reply({ content: "No permission", ephemeral: true });
 
     await channel.setName(`🟡 Pending ${ticketCount}`);
 
@@ -180,9 +174,7 @@ client.on("interactionCreate", async interaction => {
 
   // ================= ACCEPTED =================
   if (commandName === "accepted") {
-    if (!isSupport(member)) {
-      return interaction.reply({ content: "No permission", ephemeral: true });
-    }
+    if (!isSupport(member)) return interaction.reply({ content: "No permission", ephemeral: true });
 
     const reason = interaction.options.getString("reason");
 
@@ -196,9 +188,7 @@ client.on("interactionCreate", async interaction => {
 
   // ================= DENIED =================
   if (commandName === "denied") {
-    if (!isSupport(member)) {
-      return interaction.reply({ content: "No permission", ephemeral: true });
-    }
+    if (!isSupport(member)) return interaction.reply({ content: "No permission", ephemeral: true });
 
     const reason = interaction.options.getString("reason");
 
@@ -210,7 +200,7 @@ client.on("interactionCreate", async interaction => {
     });
   }
 
-  // ================= MOVE =================
+  // ================= MOVE (FIXED PROPERLY) =================
   if (commandName === "move") {
     if (!isSupport(member)) {
       return interaction.reply({ content: "No permission", ephemeral: true });
@@ -228,8 +218,15 @@ client.on("interactionCreate", async interaction => {
     const msg = await channel.messages.fetch(ticketData.messageId).catch(() => null);
 
     if (msg) {
-      await msg.edit(`# *This Ticket has been moved to a ${type}*`);
+      await msg.edit(`# This Ticket has been moved to a ${type}`);
     }
+
+    const embed = new EmbedBuilder()
+      .setColor(0x2b2d31)
+      .setTitle("Ticket Moved")
+      .setDescription(`This ticket has been moved to a **${type}**`);
+
+    await channel.send({ embeds: [embed] });
 
     return interaction.reply({
       content: `Moved to ${type}`,
@@ -274,7 +271,7 @@ client.on("interactionCreate", async interaction => {
     bug: "Bug Ticket"
   };
 
-  // ================= CREATE TICKET =================
+  // CREATE TICKET
   if (types[interaction.customId]) {
     ticketCount++;
 
@@ -389,7 +386,7 @@ Evidence (optional):*`
     });
   }
 
-  // ================= CLOSE BUTTONS =================
+  // CLOSE BUTTONS
   const ticket = tickets.get(interaction.channel.id);
   if (!ticket) return;
 
