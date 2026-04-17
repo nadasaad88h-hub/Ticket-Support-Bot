@@ -15,8 +15,13 @@ const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
 
-const SUPPORT_ROLES = ["Support Agency", "Support Agency High Command"];
-const PANEL_ALLOWED_ROLES = ["Unbreakilo"];
+// SUPPORT ROLE IDS
+const SUPPORT_ROLES = [
+  "1494277529614159893", // Support Agency
+  "1494277209668456539"  // Support Agency High Command
+];
+
+const PANEL_ROLE = "Unbreakilo";
 
 let ticketCount = 0;
 const tickets = new Map();
@@ -27,11 +32,11 @@ const client = new Client({
 
 // ================= HELPERS =================
 function isSupport(member) {
-  return member.roles.cache.some(r => SUPPORT_ROLES.includes(r.name));
+  return member.roles.cache.some(r => SUPPORT_ROLES.includes(r.id));
 }
 
 function canUsePanel(member) {
-  return member.roles.cache.some(r => PANEL_ALLOWED_ROLES.includes(r.name));
+  return member.roles.cache.some(r => r.name === PANEL_ROLE);
 }
 
 function isTicketChannel(channelId) {
@@ -48,40 +53,32 @@ client.once("ready", async () => {
 
     new SlashCommandBuilder()
       .setName("add")
-      .setDescription("Add user to ticket")
-      .addUserOption(o =>
-        o.setName("user").setDescription("User to add").setRequired(true)
-      ),
+      .setDescription("Add user")
+      .addUserOption(o => o.setName("user").setDescription("User").setRequired(true)),
 
     new SlashCommandBuilder()
       .setName("remove")
-      .setDescription("Remove user from ticket")
-      .addUserOption(o =>
-        o.setName("user").setDescription("User to remove").setRequired(true)
-      ),
+      .setDescription("Remove user")
+      .addUserOption(o => o.setName("user").setDescription("User").setRequired(true)),
 
     new SlashCommandBuilder().setName("pending").setDescription("Mark pending"),
 
     new SlashCommandBuilder()
       .setName("accepted")
       .setDescription("Accept ticket")
-      .addStringOption(o =>
-        o.setName("reason").setDescription("Reason").setRequired(true)
-      ),
+      .addStringOption(o => o.setName("reason").setDescription("Reason").setRequired(true)),
 
     new SlashCommandBuilder()
       .setName("denied")
       .setDescription("Deny ticket")
-      .addStringOption(o =>
-        o.setName("reason").setDescription("Reason").setRequired(true)
-      ),
+      .addStringOption(o => o.setName("reason").setDescription("Reason").setRequired(true)),
 
     new SlashCommandBuilder()
       .setName("move")
       .setDescription("Move ticket")
       .addStringOption(o =>
         o.setName("type")
-          .setDescription("Ticket type")
+          .setDescription("Type")
           .setRequired(true)
           .addChoices(
             { name: "Report Ticket", value: "Report Ticket" },
@@ -95,10 +92,9 @@ client.once("ready", async () => {
 
   const rest = new REST({ version: "10" }).setToken(TOKEN);
 
-  await rest.put(
-    Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-    { body: commands }
-  );
+  await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), {
+    body: commands
+  });
 
   console.log("Commands registered");
 });
@@ -112,10 +108,7 @@ client.on("interactionCreate", async interaction => {
   // ================= PANEL =================
   if (commandName === "panel") {
     if (!canUsePanel(member)) {
-      return interaction.reply({
-        content: "You are not allowed to use this.",
-        ephemeral: true
-      });
+      return interaction.reply({ content: "No permission.", ephemeral: true });
     }
 
     const embed = new EmbedBuilder()
@@ -136,10 +129,7 @@ client.on("interactionCreate", async interaction => {
 
   // BLOCK OUTSIDE TICKETS
   if (!isTicketChannel(channel.id)) {
-    return interaction.reply({
-      content: "This command can only be used inside tickets.",
-      ephemeral: true
-    });
+    return interaction.reply({ content: "Use inside tickets only.", ephemeral: true });
   }
 
   const ticket = tickets.get(channel.id);
@@ -175,7 +165,7 @@ client.on("interactionCreate", async interaction => {
     if (!isSupport(member)) return interaction.reply({ content: "No permission", ephemeral: true });
 
     await channel.setName(`🟡 Pending ${ticketCount}`);
-    return interaction.reply("Ticket marked pending");
+    return interaction.reply("Marked pending");
   }
 
   // ================= ACCEPTED =================
@@ -214,10 +204,7 @@ client.on("interactionCreate", async interaction => {
     const isStaff = isSupport(member);
 
     if (!isOwner && !isStaff) {
-      return interaction.reply({
-        content: "Only ticket owner or support can close this.",
-        ephemeral: true
-      });
+      return interaction.reply({ content: "No permission.", ephemeral: true });
     }
 
     await channel.setName(`🔴 Closing ${ticketCount}`);
@@ -248,7 +235,7 @@ client.on("interactionCreate", async interaction => {
     bug: "Bug Ticket"
   };
 
-  // ================= CREATE TICKET =================
+  // CREATE TICKET
   if (types[interaction.customId]) {
     ticketCount++;
 
@@ -274,13 +261,13 @@ client.on("interactionCreate", async interaction => {
       type
     });
 
-    // ================= YOUR EXACT MESSAGES (UNCHANGED) =================
+    // ================= YOUR EXACT MESSAGES =================
 
     let msg;
 
     if (type === "Report Ticket") {
       msg = await channel.send(
-`## Ticket Category: Report Ticket (the ## is suppose to like make the sentence a bit large like in discord, don’t include this sentence in just information.)
+`## Ticket Category: Report Ticket
 Dear ${member},
 
 To request for assistance, we kindly request you to follow the format below.
@@ -296,7 +283,7 @@ Evidence:*`
 
     if (type === "Appeal Ticket") {
       msg = await channel.send(
-`## Ticket Category: Appeal Ticket (the ## is suppose to like make the sentence a bit large like in discord, don’t include this sentence in just information.)
+`## Ticket Category: Appeal Ticket
 Dear ${member},
 
 To request for assistance, we kindly request you to follow the format below.
@@ -310,7 +297,7 @@ Appeal message:*`
 
     if (type === "Department Report Ticket") {
       msg = await channel.send(
-`## Ticket Category: Department Report Ticket (the ## is suppose to like make the sentence a bit large like in discord, don’t include this sentence in just information.)
+`## Ticket Category: Department Report Ticket
 Dear ${member},
 
 To request for assistance, we kindly request you to follow the format below.
@@ -327,7 +314,7 @@ Evidence:*`
 
     if (type === "Department Appeal Ticket") {
       msg = await channel.send(
-`## Ticket Category: Department Appeal Ticket (the ## is suppose to like make the sentence a bit large like in discord, don’t include this sentence in just information.)
+`## Ticket Category: Department Appeal Ticket
 Dear ${member},
 
 To request for assistance, we kindly request you to follow the format below.
@@ -342,7 +329,7 @@ Appeal message:*`
 
     if (type === "Bug Ticket") {
       msg = await channel.send(
-`## Ticket Category: Bug Ticket (the ## is suppose to like make the sentence a bit large like in discord, don’t include this sentence in just information.)
+`## Ticket Category: Bug Ticket
 Dear ${member},
 
 To request for assistance, we kindly request you to follow the format below.
@@ -358,13 +345,10 @@ Evidence (optional):*`
 
     if (msg) await msg.pin().catch(() => {});
 
-    return interaction.reply({
-      content: `Ticket created: ${channel}`,
-      ephemeral: true
-    });
+    return interaction.reply({ content: `Ticket created: ${channel}`, ephemeral: true });
   }
 
-  // ================= CLOSE HANDLING =================
+  // CLOSE BUTTONS
   const ticket = tickets.get(interaction.channel.id);
   if (!ticket) return;
 
