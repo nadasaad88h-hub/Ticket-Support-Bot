@@ -15,7 +15,7 @@ const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
 
-// SUPPORT ROLES
+// ================= ROLES =================
 const SUPPORT_ROLES = [
   "1494277529614159893",
   "1494277209668456539"
@@ -23,9 +23,14 @@ const SUPPORT_ROLES = [
 
 const PANEL_ROLE = "Unbreakilo";
 
+// ================= STATE =================
 let ticketCount = 0;
-const tickets = new Map();
 
+const tickets = new Map(); // channelId -> { ownerId, type, messageId }
+const closeVotes = new Map(); // channelId -> { yes:Set, no:Set }
+const claimedTickets = new Map(); // channelId -> userId
+
+// ================= CLIENT =================
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers]
 });
@@ -99,7 +104,7 @@ client.once("ready", async () => {
   console.log("Commands registered");
 });
 
-// ================= COMMAND HANDLER =================
+// ================= COMMANDS =================
 client.on("interactionCreate", async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
@@ -127,10 +132,10 @@ client.on("interactionCreate", async interaction => {
     return interaction.reply({ embeds: [embed], components: [row] });
   }
 
-  // ================= BLOCK OUTSIDE TICKETS =================
+  // ================= TICKET ONLY CHECK =================
   if (!isTicketChannel(channel.id) && commandName !== "panel") {
     return interaction.reply({
-      content: "Use inside tickets only.",
+      content: "🚨 This command can only be executed inside a ticket!",
       ephemeral: true
     });
   }
@@ -172,7 +177,7 @@ client.on("interactionCreate", async interaction => {
     return interaction.reply({ content: "Marked pending", ephemeral: true });
   }
 
-  // ================= ACCEPTED =================
+  // ================= ACCEPT =================
   if (commandName === "accepted") {
     if (!isSupport(member)) return interaction.reply({ content: "No permission", ephemeral: true });
 
@@ -186,7 +191,7 @@ client.on("interactionCreate", async interaction => {
     });
   }
 
-  // ================= DENIED =================
+  // ================= DENY =================
   if (commandName === "denied") {
     if (!isSupport(member)) return interaction.reply({ content: "No permission", ephemeral: true });
 
@@ -200,11 +205,9 @@ client.on("interactionCreate", async interaction => {
     });
   }
 
-  // ================= MOVE (FIXED PROPERLY) =================
+  // ================= MOVE =================
   if (commandName === "move") {
-    if (!isSupport(member)) {
-      return interaction.reply({ content: "No permission", ephemeral: true });
-    }
+    if (!isSupport(member)) return interaction.reply({ content: "No permission", ephemeral: true });
 
     const type = interaction.options.getString("type");
 
@@ -245,15 +248,26 @@ client.on("interactionCreate", async interaction => {
 
     await channel.setName(`🔴 Closing ${ticketCount}`);
 
+    closeVotes.set(channel.id, { yes: new Set(), no: new Set() });
+
+    const embed = new EmbedBuilder()
+      .setColor(0x2b2d31)
+      .setTitle("## Close!")
+      .setDescription(`***${member} wants to close this ticket!***`);
+
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("close_accept").setLabel("Accept").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("close_deny").setLabel("Deny").setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder()
+        .setCustomId("close_yes")
+        .setLabel("Confirm")
+        .setStyle(ButtonStyle.Success),
+
+      new ButtonBuilder()
+        .setCustomId("close_no")
+        .setLabel("Deny")
+        .setStyle(ButtonStyle.Danger)
     );
 
-    return interaction.reply({
-      content: `Close!\n${member} wants to close this ticket.`,
-      components: [row]
-    });
+    return interaction.reply({ embeds: [embed], components: [row] });
   }
 });
 
@@ -261,7 +275,7 @@ client.on("interactionCreate", async interaction => {
 client.on("interactionCreate", async interaction => {
   if (!interaction.isButton()) return;
 
-  const { guild, member } = interaction;
+  const { guild, member, channel } = interaction;
 
   const types = {
     report: "Report Ticket",
@@ -271,13 +285,13 @@ client.on("interactionCreate", async interaction => {
     bug: "Bug Ticket"
   };
 
-  // CREATE TICKET
+  // ================= CREATE TICKET =================
   if (types[interaction.customId]) {
     ticketCount++;
 
     const type = types[interaction.customId];
 
-    const channel = await guild.channels.create({
+    const channelCreated = await guild.channels.create({
       name: `${type} ${ticketCount}`,
       permissionOverwrites: [
         { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
@@ -295,7 +309,7 @@ client.on("interactionCreate", async interaction => {
     let msg;
 
     if (type === "Report Ticket") {
-      msg = await channel.send(
+      msg = await channelCreated.send(
 `## Ticket Category: Report Ticket
 Dear ${member},
 
@@ -311,7 +325,7 @@ Evidence:*`
     }
 
     if (type === "Appeal Ticket") {
-      msg = await channel.send(
+      msg = await channelCreated.send(
 `## Ticket Category: Appeal Ticket
 Dear ${member},
 
@@ -325,7 +339,7 @@ Appeal message:*`
     }
 
     if (type === "Department Report Ticket") {
-      msg = await channel.send(
+      msg = await channelCreated.send(
 `## Ticket Category: Department Report Ticket
 Dear ${member},
 
@@ -342,7 +356,7 @@ Evidence:*`
     }
 
     if (type === "Department Appeal Ticket") {
-      msg = await channel.send(
+      msg = await channelCreated.send(
 `## Ticket Category: Department Appeal Ticket
 Dear ${member},
 
@@ -357,7 +371,7 @@ Appeal message:*`
     }
 
     if (type === "Bug Ticket") {
-      msg = await channel.send(
+      msg = await channelCreated.send(
 `## Ticket Category: Bug Ticket
 Dear ${member},
 
@@ -374,30 +388,96 @@ Evidence (optional):*`
 
     await msg.pin().catch(() => {});
 
-    tickets.set(channel.id, {
+    // CLAIM BUTTON
+    const claimRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("claim_ticket")
+        .setLabel("Claim Ticket")
+        .setStyle(ButtonStyle.Success)
+    );
+
+    const claimMsg = await channelCreated.send({
+      content: "Click below to claim this ticket.",
+      components: [claimRow]
+    });
+
+    tickets.set(channelCreated.id, {
       ownerId: member.id,
       type,
-      messageId: msg.id
+      messageId: msg.id,
+      claimMessageId: claimMsg.id
     });
 
     return interaction.reply({
-      content: `Ticket created: ${channel}`,
+      content: `Ticket created: ${channelCreated}`,
       ephemeral: true
     });
   }
 
-  // CLOSE BUTTONS
-  const ticket = tickets.get(interaction.channel.id);
+  // ================= CLAIM =================
+  if (interaction.customId === "claim_ticket") {
+    const allowed = member.roles.cache.some(r =>
+      SUPPORT_ROLES.includes(r.id)
+    );
+
+    if (!allowed) {
+      return member.send("🚨You do not have required authorization to claim this ticket!");
+    }
+
+    if (claimedTickets.has(channel.id)) {
+      return interaction.reply({ content: "Already claimed.", ephemeral: true });
+    }
+
+    claimedTickets.set(channel.id, member.id);
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("claim_ticket")
+        .setLabel("Claimed")
+        .setStyle(ButtonStyle.Success)
+        .setDisabled(true)
+    );
+
+    await interaction.update({ components: [row] });
+  }
+
+  // ================= CLOSE VOTES =================
+  const ticket = tickets.get(channel.id);
   if (!ticket) return;
 
-  if (interaction.customId === "close_accept") {
-    tickets.delete(interaction.channel.id);
-    return interaction.channel.delete();
+  if (!closeVotes.has(channel.id)) return;
+
+  const vote = closeVotes.get(channel.id);
+
+  const isOwner = member.id === ticket.ownerId;
+  const isStaff = isSupport(member);
+
+  if (!isOwner && !isStaff) return;
+
+  if (interaction.customId === "close_yes") {
+    vote.no.delete(member.id);
+    vote.yes.add(member.id);
   }
 
-  if (interaction.customId === "close_deny") {
-    return interaction.reply("Close cancelled.");
+  if (interaction.customId === "close_no") {
+    vote.yes.delete(member.id);
+    vote.no.add(member.id);
+
+    return interaction.reply({
+      content: `${member} ***has denied to close this ticket.***`
+    });
   }
+
+  if (vote.yes.size >= 2) {
+    tickets.delete(channel.id);
+    closeVotes.delete(channel.id);
+    return channel.delete();
+  }
+
+  return interaction.reply({
+    content: `Vote registered.`,
+    ephemeral: true
+  });
 });
 
 client.login(TOKEN);
