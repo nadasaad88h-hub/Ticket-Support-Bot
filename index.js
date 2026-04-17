@@ -131,7 +131,7 @@ client.on("interactionCreate", async interaction => {
     return interaction.reply({ embeds: [embed], components: [row] });
   }
 
-  // ================= TICKET ONLY CHECK =================
+  // ================= TICKET CHECK =================
   if (!isTicketChannel(channel.id) && commandName !== "panel") {
     return interaction.reply({
       content: "🚨 This command can only be executed inside a ticket!",
@@ -141,12 +141,12 @@ client.on("interactionCreate", async interaction => {
 
   const ticket = tickets.get(channel.id);
 
-  // ================= ALL STAFF COMMANDS =================
-  const staffOnlyReply = (msg) =>
+  const staffReply = (msg) =>
     interaction.reply({ content: msg, ephemeral: true });
 
+  // ================= STAFF COMMANDS =================
   if (commandName === "add") {
-    if (!isSupport(member)) return staffOnlyReply("No permission");
+    if (!isSupport(member)) return staffReply("No permission");
 
     const user = interaction.options.getUser("user");
 
@@ -156,49 +156,49 @@ client.on("interactionCreate", async interaction => {
       ReadMessageHistory: true
     });
 
-    return staffOnlyReply(`Added ${user}`);
+    return staffReply(`Added ${user}`);
   }
 
   if (commandName === "remove") {
-    if (!isSupport(member)) return staffOnlyReply("No permission");
+    if (!isSupport(member)) return staffReply("No permission");
 
     const user = interaction.options.getUser("user");
 
     await channel.permissionOverwrites.delete(user.id);
 
-    return staffOnlyReply(`Removed ${user}`);
+    return staffReply(`Removed ${user}`);
   }
 
   if (commandName === "pending") {
-    if (!isSupport(member)) return staffOnlyReply("No permission");
+    if (!isSupport(member)) return staffReply("No permission");
 
     await channel.setName(`🟡 Pending ${ticketCount}`);
-    return staffOnlyReply("Marked pending");
+    return staffReply("Marked pending");
   }
 
   if (commandName === "accepted") {
-    if (!isSupport(member)) return staffOnlyReply("No permission");
+    if (!isSupport(member)) return staffReply("No permission");
 
     const reason = interaction.options.getString("reason");
 
     await channel.setName(`🟢 Accepted ${ticketCount}`);
 
-    return staffOnlyReply(`Accepted: ${reason}`);
+    return staffReply(`Accepted: ${reason}`);
   }
 
   if (commandName === "denied") {
-    if (!isSupport(member)) return staffOnlyReply("No permission");
+    if (!isSupport(member)) return staffReply("No permission");
 
     const reason = interaction.options.getString("reason");
 
     await channel.setName(`🔴 Denied ${ticketCount}`);
 
-    return staffOnlyReply(`Denied: ${reason}`);
+    return staffReply(`Denied: ${reason}`);
   }
 
   // ================= MOVE =================
   if (commandName === "move") {
-    if (!isSupport(member)) return staffOnlyReply("No permission");
+    if (!isSupport(member)) return staffReply("No permission");
 
     const type = interaction.options.getString("type");
 
@@ -218,7 +218,7 @@ client.on("interactionCreate", async interaction => {
 
     await channel.send({ embeds: [embed] });
 
-    return staffOnlyReply(`Moved to ${type}`);
+    return staffReply(`Moved to ${type}`);
   }
 
   // ================= CLOSE =================
@@ -226,7 +226,7 @@ client.on("interactionCreate", async interaction => {
     const isOwner = member.id === ticket.ownerId;
     const isStaff = isSupport(member);
 
-    if (!isOwner && !isStaff) return staffOnlyReply("No permission");
+    if (!isOwner && !isStaff) return staffReply("No permission");
 
     await channel.setName(`🔴 Closing ${ticketCount}`);
 
@@ -253,7 +253,7 @@ client.on("interactionCreate", async interaction => {
   }
 });
 
-// ================= BUTTON HANDLER =================
+// ================= BUTTONS =================
 client.on("interactionCreate", async interaction => {
   if (!interaction.isButton()) return;
 
@@ -347,7 +347,14 @@ Evidence:*`,
         .setDisabled(true)
     );
 
-    return interaction.update({ components: [row] });
+    await interaction.update({ components: [row] });
+
+    // ✅ FINAL CLAIM EMBED
+    const claimEmbed = new EmbedBuilder()
+      .setColor(0x2b2d31)
+      .setDescription(`This ticket has been claimed by ${member}.`);
+
+    await channel.send({ embeds: [claimEmbed] });
   }
 
   // ================= CLOSE VOTES =================
