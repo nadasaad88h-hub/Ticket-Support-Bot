@@ -50,8 +50,6 @@ const commands = [
 // ───────── HELPERS ─────────
 const isSupport = (m) => m.roles.cache.has(SUPPORT_ROLE_ID) || m.roles.cache.has(HIGH_COMMAND_ROLE_ID) || m.permissions.has(PermissionFlagsBits.Administrator);
 const isUnbreakilo = (m) => m.roles.cache.some(r => r.name === UNBREAKILO_ROLE_NAME);
-
-// BUG FIX: Improved isTicket check to look for our specific prefixes anywhere in the name
 const isTicket = (c) => TICKET_TYPES.some(t => c.name.toLowerCase().includes(t.prefix.toLowerCase()));
 
 const client = new Client({
@@ -70,7 +68,6 @@ client.on("interactionCreate", async (interaction) => {
   const { member, guild, channel, user, customId, commandName, options } = interaction;
 
   if (interaction.isChatInputCommand()) {
-    // 1. PANEL
     if (commandName === "panel") {
       if (!isUnbreakilo(member)) return interaction.reply({ content: "🚨 Only members with the **Unbreakilo** role can use this command.", ephemeral: true });
       const embed = new EmbedBuilder().setDescription("## TICKET CATEGORY:\n\nSeeking for Support? Select the correct ticket here for quick assistance!").setColor(0x2b2d31);
@@ -78,21 +75,17 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.reply({ embeds: [embed], components: [row] });
     }
 
-    // TICKET COMMANDS
     if (["close", "pending", "accepted", "denied", "add", "remove", "move"].includes(commandName)) {
       if (!isTicket(channel)) return interaction.reply({ content: "🚨 This command can only be used inside a ticket channel!", ephemeral: true });
       
       const isOwner = channel.topic === user.id;
       
-      // Permission Handling
       if (commandName === "close") {
           if (!isSupport(member) && !isOwner && !isUnbreakilo(member)) return interaction.reply({ content: "🚨 You do not have permission to manage this ticket.", ephemeral: true });
       } else {
-          // All other management commands are STAFF ONLY
           if (!isSupport(member) && !isUnbreakilo(member)) return interaction.reply({ content: "🚨 Only the Support Team can use this command.", ephemeral: true });
       }
 
-      // CLOSE LOGIC
       if (commandName === "close") {
         if (isUnbreakilo(member)) {
           await interaction.reply("🔒 **Unbreakilo** bypass triggered. Deleting channel...");
@@ -106,28 +99,26 @@ client.on("interactionCreate", async (interaction) => {
         return interaction.reply({ embeds: [embed], components: [row] });
       }
 
-      // STATUS UPDATES (RENAME LOGIC)
+      // FIXED STATUS RENAMING LOGIC
       if (["pending", "accepted", "denied"].includes(commandName)) {
         let emoji, status;
         if (commandName === "pending") { emoji = "🟡"; status = "Pending"; }
         if (commandName === "accepted") { emoji = "🟢"; status = "Accepted"; }
         if (commandName === "denied") { emoji = "🔴"; status = "Denied"; }
 
-        // Strip old status if exists and apply new one
-        const cleanName = channel.name.replace(/^(🟡|🟢|🔴)\s(Pending|Accepted|Denied)_/i, "");
-        await channel.setName(`${emoji} ${status}_${cleanName}`);
+        // This regex removes ANY previous emoji/status prefix from the start of the name
+        const cleanName = channel.name.replace(/^(🟡|🟢|🔴)\s(Pending|Accepted|Denied)_/gi, "");
         
+        await channel.setName(`${emoji} ${status}_${cleanName}`);
         return interaction.reply({ content: `✅ Ticket status updated to **${status.toUpperCase()}**.`, ephemeral: true });
       }
 
-      // ADD/REMOVE
       if (commandName === "add" || commandName === "remove") {
         const target = options.getMember("user");
         await channel.permissionOverwrites.edit(target.id, { ViewChannel: commandName === "add" });
         return interaction.reply({ content: `${commandName === "add" ? "Added" : "Removed"} ${target} to the ticket.`, ephemeral: true });
       }
 
-      // MOVE
       if (commandName === "move") {
         const cat = options.getChannel("category");
         await channel.setParent(cat.id, { lockPermissions: false });
@@ -136,7 +127,6 @@ client.on("interactionCreate", async (interaction) => {
     }
   }
 
-  // ───── BUTTONS ─────
   if (interaction.isButton()) {
     if (customId.startsWith("create_")) {
       await interaction.deferReply({ ephemeral: true });
