@@ -26,10 +26,10 @@ const PANEL_ROLE = "Unbreakilo";
 // ================= STATE =================
 let ticketCount = 0;
 
-const tickets = new Map(); // channelId -> { ownerId, type, messageId }
-const closeVotes = new Map(); // channelId -> { yes:Set, no:Set }
-const claimedTickets = new Map(); // channelId -> userId
-const userTickets = new Map(); // userId -> { type: channelId }
+const tickets = new Map();
+const closeVotes = new Map();
+const claimedTickets = new Map();
+const userTickets = new Map();
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers]
@@ -44,8 +44,23 @@ function canUsePanel(member) {
   return member.roles.cache.some(r => r.name === PANEL_ROLE);
 }
 
-function isTicketChannel(channelId) {
-  return tickets.has(channelId);
+// ✅ FIXED TICKET DETECTION (IMPORTANT)
+function isTicketChannel(channel) {
+  if (!channel || !channel.name) return false;
+
+  const name = channel.name.toLowerCase();
+
+  return (
+    name.includes("ticket") ||
+    name.includes("report") ||
+    name.includes("appeal") ||
+    name.includes("bug") ||
+    name.includes("pending") ||
+    name.includes("accepted") ||
+    name.includes("denied") ||
+    name.includes("closing") ||
+    name.includes("dept")
+  );
 }
 
 // ================= READY =================
@@ -132,8 +147,8 @@ client.on("interactionCreate", async interaction => {
     return interaction.reply({ embeds: [embed], components: [row] });
   }
 
-  // ================= TICKET CHECK =================
-  if (!isTicketChannel(channel.id) && commandName !== "panel") {
+  // ================= FIXED TICKET CHECK =================
+  if (!isTicketChannel(channel) && commandName !== "panel") {
     return interaction.reply({
       content: "🚨 This command can only be executed inside a ticket!",
       ephemeral: true
@@ -266,15 +281,12 @@ client.on("interactionCreate", async interaction => {
     bug: "Bug Ticket"
   };
 
-  // ================= LIMIT CHECK =================
+  // ================= CREATE TICKET =================
   if (types[interaction.customId]) {
     const type = types[interaction.customId];
     const userId = member.id;
 
-    if (!userTickets.has(userId)) {
-      userTickets.set(userId, {});
-    }
-
+    if (!userTickets.has(userId)) userTickets.set(userId, {});
     const existing = userTickets.get(userId);
 
     if (existing[type]) {
