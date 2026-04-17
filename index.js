@@ -60,7 +60,7 @@ client.once("ready", async () => {
         o.setName("user").setDescription("User to remove").setRequired(true)
       ),
 
-    new SlashCommandBuilder().setName("pending").setDescription("Mark ticket pending"),
+    new SlashCommandBuilder().setName("pending").setDescription("Mark pending"),
 
     new SlashCommandBuilder()
       .setName("accepted")
@@ -248,7 +248,7 @@ client.on("interactionCreate", async interaction => {
     bug: "Bug Ticket"
   };
 
-  // CREATE TICKET
+  // ================= CREATE TICKET =================
   if (types[interaction.customId]) {
     ticketCount++;
 
@@ -274,13 +274,97 @@ client.on("interactionCreate", async interaction => {
       type
     });
 
+    // ================= YOUR EXACT MESSAGES (UNCHANGED) =================
+
+    let msg;
+
+    if (type === "Report Ticket") {
+      msg = await channel.send(
+`## Ticket Category: Report Ticket (the ## is suppose to like make the sentence a bit large like in discord, don’t include this sentence in just information.)
+Dear ${member},
+
+To request for assistance, we kindly request you to follow the format below.
+
+*Your username:
+Your rank:
+Their username:
+Rule Violated:
+
+Evidence:*`
+      );
+    }
+
+    if (type === "Appeal Ticket") {
+      msg = await channel.send(
+`## Ticket Category: Appeal Ticket (the ## is suppose to like make the sentence a bit large like in discord, don’t include this sentence in just information.)
+Dear ${member},
+
+To request for assistance, we kindly request you to follow the format below.
+
+*Your username:
+Your rank:
+Infraction:
+Appeal message:*`
+      );
+    }
+
+    if (type === "Department Report Ticket") {
+      msg = await channel.send(
+`## Ticket Category: Department Report Ticket (the ## is suppose to like make the sentence a bit large like in discord, don’t include this sentence in just information.)
+Dear ${member},
+
+To request for assistance, we kindly request you to follow the format below.
+
+*Your username:
+Your rank:
+Their username:
+Their department:
+Rule Violated:
+
+Evidence:*`
+      );
+    }
+
+    if (type === "Department Appeal Ticket") {
+      msg = await channel.send(
+`## Ticket Category: Department Appeal Ticket (the ## is suppose to like make the sentence a bit large like in discord, don’t include this sentence in just information.)
+Dear ${member},
+
+To request for assistance, we kindly request you to follow the format below.
+
+*Your username:
+Your department:
+infraction:
+
+Appeal message:*`
+      );
+    }
+
+    if (type === "Bug Ticket") {
+      msg = await channel.send(
+`## Ticket Category: Bug Ticket (the ## is suppose to like make the sentence a bit large like in discord, don’t include this sentence in just information.)
+Dear ${member},
+
+To request for assistance, we kindly request you to follow the format below.
+
+*Your username:
+Your rank:
+Server Bug:
+How’s it’s affecting the server:
+
+Evidence (optional):*`
+      );
+    }
+
+    if (msg) await msg.pin().catch(() => {});
+
     return interaction.reply({
       content: `Ticket created: ${channel}`,
       ephemeral: true
     });
   }
 
-  // CLOSE HANDLING
+  // ================= CLOSE HANDLING =================
   const ticket = tickets.get(interaction.channel.id);
   if (!ticket) return;
 
