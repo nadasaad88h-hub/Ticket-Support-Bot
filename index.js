@@ -1,17 +1,9 @@
 "use strict";
 
 const {
-  Client,
-  GatewayIntentBits,
-  REST,
-  Routes,
-  SlashCommandBuilder,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  EmbedBuilder,
-  PermissionFlagsBits,
-  ChannelType,
+  Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder,
+  PermissionFlagsBits, ChannelType
 } = require("discord.js");
 
 const TOKEN = process.env.DISCORD_TOKEN;
@@ -39,19 +31,25 @@ const commands = [
   new SlashCommandBuilder().setName("pending").setDescription("Mark ticket as pending"),
   new SlashCommandBuilder().setName("accepted").setDescription("Mark ticket as accepted"),
   new SlashCommandBuilder().setName("denied").setDescription("Mark ticket as denied"),
-  new SlashCommandBuilder().setName("add").setDescription("Add a user to the ticket").addUserOption(o => o.setName("user").setDescription("The user to add").setRequired(true)),
-  new SlashCommandBuilder().setName("remove").setDescription("Remove a user from the ticket").addUserOption(o => o.setName("user").setDescription("The user to remove").setRequired(true)),
-  new SlashCommandBuilder().setName("move").setDescription("Move the ticket to another category").addChannelOption(o => o.setName("category").setDescription("Target category").setRequired(true).addChannelTypes(ChannelType.GuildCategory)),
+  new SlashCommandBuilder().setName("add").setDescription("Add a user").addUserOption(o => o.setName("user").setRequired(true)),
+  new SlashCommandBuilder().setName("remove").setDescription("Remove a user").addUserOption(o => o.setName("user").setRequired(true)),
+  new SlashCommandBuilder().setName("move").setDescription("Change ticket type")
+    .addStringOption(o => o.setName("type").setDescription("Select new ticket category").setRequired(true)
+    .addChoices(...TICKET_TYPES.map(t => ({ name: t.label, value: t.id })))),
 ].map(c => c.toJSON());
 
 const isSupport = (m) => m.roles.cache.has(SUPPORT_ROLE_ID) || m.roles.cache.has(HIGH_COMMAND_ROLE_ID) || m.permissions.has(PermissionFlagsBits.Administrator);
 const isUnbreakilo = (m) => m.roles.cache.some(r => r.name === UNBREAKILO_ROLE_NAME);
 
-// ───────── THE BIG FIX: IDENTIFY BY TOPIC ─────────
-const getTicketOwnerId = (c) => {
-    if (!c.topic) return null;
-    const match = c.topic.match(/TICKET_OWNER:(\d+)/);
-    return match ? match[1] : null;
+// Data Parser for Topic
+const getTicketData = (topic) => {
+    if (!topic) return {};
+    const data = {};
+    topic.split(" | ").forEach(part => {
+        const [key, val] = part.split(":");
+        if (key && val) data[key] = val;
+    });
+    return data;
 };
 
 const client = new Client({
@@ -71,66 +69,74 @@ client.on("interactionCreate", async (interaction) => {
 
   if (interaction.isChatInputCommand()) {
     if (commandName === "panel") {
-      if (!isUnbreakilo(member)) return interaction.reply({ content: "🚨 Only members with the **Unbreakilo** role can use this command.", ephemeral: true });
+      if (!isUnbreakilo(member)) return interaction.reply({ content: "🚨 Only **Unbreakilo** can use this.", ephemeral: true });
       const embed = new EmbedBuilder().setDescription("## TICKET CATEGORY:\n\nSeeking for Support? Select the correct ticket here for quick assistance!").setColor(0x2b2d31);
       const row = new ActionRowBuilder().addComponents(TICKET_TYPES.map(t => new ButtonBuilder().setCustomId(`create_${t.id}`).setLabel(t.label).setStyle(ButtonStyle.Secondary)));
       return interaction.reply({ embeds: [embed], components: [row] });
     }
 
-    // ───── TICKET COMMANDS ─────
-    const ownerId = getTicketOwnerId(channel);
-    if (["close", "pending", "accepted", "denied", "add", "remove", "move"].includes(commandName)) {
-      if (!ownerId) return interaction.reply({ content: "🚨 This channel is not a registered ticket!", ephemeral: true });
-      
-      const isOwner = user.id === ownerId;
-      const isStaff = isSupport(member) || isUnbreakilo(member);
+    // ───── WORKFLOW LOGIC ─────
+    const data = getTicketData(channel.topic);
+    if (!data.TICKET_OWNER) return interaction.reply({ content: "🚨 Not a ticket channel.", ephemeral: true });
 
-      if (commandName === "close") {
-          if (!isStaff && !isOwner) return interaction.reply({ content: "🚨 You do not have permission to close this ticket.", ephemeral: true });
-      } else {
-          if (!isStaff) return interaction.reply({ content: "🚨 Only the Support Team can use this command.", ephemeral: true });
-      }
+    const isOwner = user.id === data.TICKET_OWNER;
+    const isStaff = isSupport(member) || isUnbreakilo(member);
 
-      if (commandName === "close") {
-        if (isUnbreakilo(member)) {
-          await interaction.reply("🔒 **Unbreakilo** bypass: Deleting...");
-          return setTimeout(() => channel.delete().catch(() => {}), 2000);
-        }
-        const embed = new EmbedBuilder().setDescription(`## Close!\n\n***${user} wants to close this ticket!***\n\nGreen button: Confirm      Red button: Deny`).setColor(0xed4245);
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId("v_confirm").setLabel("Confirm").setStyle(ButtonStyle.Success),
-          new ButtonBuilder().setCustomId("v_deny").setLabel("Deny").setStyle(ButtonStyle.Danger)
-        );
-        return interaction.reply({ embeds: [embed], components: [row] });
-      }
+    // 1. Requirement: Must be CLAIMED for any command
+    if (!data.CLAIMED_BY && commandName !== "close") {
+        return interaction.reply({ content: "🚨 This ticket must be **Claimed** by staff before using commands.", ephemeral: true });
+    }
 
-      // ───────── STATUS RENAMING (CLEAN SLATE) ─────────
-      if (["pending", "accepted", "denied"].includes(commandName)) {
-        let emoji, status;
-        if (commandName === "pending") { emoji = "🟡"; status = "Pending"; }
-        if (commandName === "accepted") { emoji = "🟢"; status = "Accepted"; }
-        if (commandName === "denied") { emoji = "🔴"; status = "Denied"; }
+    if (["pending", "accepted", "denied", "move", "add", "remove"].includes(commandName) && !isStaff) {
+        return interaction.reply({ content: "🚨 Staff only command.", ephemeral: true });
+    }
 
-        // Find the original type by looking at the topic (we store it there now too)
-        const typeMatch = channel.topic.match(/TYPE:([\w_]+)/);
-        const countMatch = channel.topic.match(/COUNT:(\d+)/);
-        const baseName = typeMatch ? `${typeMatch[1]}-${countMatch[1]}` : channel.name;
+    // --- COMMANDS ---
 
-        await channel.setName(`${emoji} ${status}_${baseName}`);
-        return interaction.reply({ content: `✅ Ticket marked as **${status}**.`, ephemeral: true });
-      }
+    if (commandName === "close") {
+      if (!isStaff && !isOwner) return interaction.reply({ content: "🚨 No permission.", ephemeral: true });
+      if (isUnbreakilo(member)) return channel.delete();
+      const embed = new EmbedBuilder().setDescription(`## Close!\n***${user} wants to close!***\n\nGreen: Confirm | Red: Deny`).setColor(0xed4245);
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId("v_confirm").setLabel("Confirm").setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId("v_deny").setLabel("Deny").setStyle(ButtonStyle.Danger)
+      );
+      return interaction.reply({ embeds: [embed], components: [row] });
+    }
 
-      if (commandName === "add" || commandName === "remove") {
+    if (commandName === "move") {
+        if (data.STATUS) return interaction.reply({ content: "🚨 Cannot move ticket once a status (Pending/Accepted/Denied) has been set.", ephemeral: true });
+        const newTypeId = options.getString("type");
+        const newType = TICKET_TYPES.find(t => t.id === newTypeId);
+        
+        const newTopic = `TICKET_OWNER:${data.TICKET_OWNER} | TYPE:${newType.prefix} | COUNT:${data.COUNT} | CLAIMED_BY:${data.CLAIMED_BY}`;
+        await channel.setTopic(newTopic);
+        await channel.setName(`${newType.prefix}-${data.COUNT}`);
+        return interaction.reply({ content: `✅ Ticket converted to **${newType.label}**.`, ephemeral: true });
+    }
+
+    if (commandName === "pending") {
+        const newTopic = `${channel.topic} | STATUS:PENDING`;
+        await channel.setTopic(newTopic);
+        await channel.setName(`🟡 Pending_${data.TYPE}-${data.COUNT}`);
+        return interaction.reply({ content: "✅ Ticket marked as **Pending**.", ephemeral: true });
+    }
+
+    if (commandName === "accepted" || commandName === "denied") {
+        if (data.STATUS !== "PENDING") return interaction.reply({ content: "🚨 You must use `/pending` before accepting or denying.", ephemeral: true });
+        
+        const emoji = commandName === "accepted" ? "🟢" : "🔴";
+        const label = commandName === "accepted" ? "Accepted" : "Denied";
+        
+        await channel.setName(`${emoji} ${label}_${data.TYPE}-${data.COUNT}`);
+        return interaction.reply({ content: `✅ Ticket has been **${label}**.`, ephemeral: true });
+    }
+    
+    // Add/Remove
+    if (commandName === "add" || commandName === "remove") {
         const target = options.getMember("user");
         await channel.permissionOverwrites.edit(target.id, { ViewChannel: commandName === "add" });
-        return interaction.reply({ content: `${commandName === "add" ? "Added" : "Removed"} ${target}.`, ephemeral: true });
-      }
-
-      if (commandName === "move") {
-        const cat = options.getChannel("category");
-        await channel.setParent(cat.id, { lockPermissions: false });
-        return interaction.reply({ content: `Moved to **${cat.name}**.`, ephemeral: true });
-      }
+        return interaction.reply({ content: `User ${commandName === "add" ? "added" : "removed"}.`, ephemeral: true });
     }
   }
 
@@ -142,9 +148,6 @@ client.on("interactionCreate", async (interaction) => {
 
       const tChan = await guild.channels.create({
         name: `${type.prefix}-${ticketCount}`,
-        type: ChannelType.GuildText,
-        parent: cat ? cat.id : null,
-        // WE STORE ALL DATA IN TOPIC - THIS IS THE ANCHOR
         topic: `TICKET_OWNER:${user.id} | TYPE:${type.prefix} | COUNT:${ticketCount}`,
         permissionOverwrites: [
           { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
@@ -154,40 +157,33 @@ client.on("interactionCreate", async (interaction) => {
         ],
       });
       ticketCount++;
-
       const embed = new EmbedBuilder().setColor(type.color).setDescription(type.message.replace("{user MENTION}", `<@${user.id}>`));
       const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("claim").setLabel("Claim").setStyle(ButtonStyle.Success));
       await tChan.send({ content: `<@${user.id}>`, embeds: [embed], components: [row] });
-      return interaction.editReply(`✅ Ticket created: ${tChan}`);
+      return interaction.editReply(`✅ Ticket: ${tChan}`);
     }
 
     if (customId === "claim") {
-      if (!isSupport(member)) return interaction.reply({ content: "🚨You do not have required authorization to claim this ticket!", ephemeral: true });
-      const disabledRow = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("claimed_disabled").setLabel("Claimed").setStyle(ButtonStyle.Success).setDisabled(true));
+      if (!isSupport(member)) return interaction.reply({ content: "🚨 No authorization!", ephemeral: true });
+      
+      const data = getTicketData(channel.topic);
+      await channel.setTopic(`${channel.topic} | CLAIMED_BY:${user.id}`);
+      
+      const disabledRow = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("c").setLabel("Claimed").setStyle(ButtonStyle.Success).setDisabled(true));
       await interaction.message.edit({ components: [disabledRow] });
-      return interaction.reply(`This ticket has been claimed by ${user}.`);
+      return interaction.reply(`Claimed by ${user}.`);
     }
 
     if (customId === "v_confirm") {
-      const ownerId = getTicketOwnerId(channel);
-      const isOwner = user.id === ownerId;
-      const isSup = isSupport(member);
-      let votes = closeVotes.get(channel.id) || { support: false, owner: false };
-      if (isSup) votes.support = true;
-      if (isOwner) votes.owner = true;
-      closeVotes.set(channel.id, votes);
-
-      if (votes.support && votes.owner) {
-        await interaction.reply("✅ Both confirmed. Deleting in 5 seconds...");
-        return setTimeout(() => channel.delete().catch(() => {}), 5000);
-      }
-      return interaction.reply(`✅ Vote logged. Need **${!votes.support ? "Support Agency" : "Ticket Owner"}** to confirm.`);
+        const data = getTicketData(channel.topic);
+        let votes = closeVotes.get(channel.id) || { s: false, o: false };
+        if (isSupport(member)) votes.s = true;
+        if (user.id === data.TICKET_OWNER) votes.o = true;
+        closeVotes.set(channel.id, votes);
+        if (votes.s && votes.o) return channel.delete();
+        return interaction.reply(`Vote logged. Need ${!votes.s ? "Staff" : "Owner"}.`);
     }
-
-    if (customId === "v_deny") {
-      closeVotes.delete(channel.id);
-      return interaction.reply(`${user} denied close request. Voting reset.`);
-    }
+    if (customId === "v_deny") { closeVotes.delete(channel.id); return interaction.reply("Denied."); }
   }
 });
 
