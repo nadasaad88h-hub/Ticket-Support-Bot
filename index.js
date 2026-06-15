@@ -115,7 +115,6 @@ function saveJSON(file, data) {
 }
 
 let ticketData = loadJSON('./tickets.json', { channels: {}, sequentialCounter: 1000 });
-
 // ────────────────────────────────────────────────────────
 // APPLICATION BOOTSTRAP & COMMAND DEPLOYER
 // ────────────────────────────────────────────────────────
@@ -140,12 +139,19 @@ client.once('ready', async () => {
                 .setDescription('Instantly deletes the ticket in 3 seconds flat.')
         ].map(cmd => cmd.toJSON());
 
-        await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-        console.log('✅ Ticket slash commands successfully synced globally.');
+        // 🎯 REPLACE 'YOUR_SERVER_ID_HERE' with your actual Discord Server ID numbers!
+        const GUILD_ID = 'YOUR_SERVER_ID_HERE'; 
+
+        await rest.put(
+            Routes.applicationGuildCommands(client.user.id, GUILD_ID), 
+            { body: commands }
+        );
+        console.log('✅ Ticket slash commands successfully synced INSTANTLY to your test server.');
     } catch (e) {
         console.error('Failed deploying slash commands:', e);
     }
 });
+
 
 // ────────────────────────────────────────────────────────
 // CORE SLASH COMMANDS DISPATCHER
