@@ -1,12 +1,13 @@
 {
-  "name": "lagging-legends-tickets",
+  "name": "legends-ticket-system",
   "version": "1.0.0",
+  "description": "Premium multi-category ticket management system.",
   "main": "index.js",
-  "type": "commonjs",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "discord.js": "^14.15.3"
+    "discord.js": "^14.14.1",
+    "express": "^4.19.2"
   }
 }
