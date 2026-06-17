@@ -1,4 +1,4 @@
-const { 
+pconst { 
     Client, 
     GatewayIntentBits, 
     Partials, 
@@ -115,6 +115,7 @@ function saveJSON(file, data) {
 }
 
 let ticketData = loadJSON('./tickets.json', { channels: {}, sequentialCounter: 1000 });
+
 // ────────────────────────────────────────────────────────
 // APPLICATION BOOTSTRAP & COMMAND DEPLOYER
 // ────────────────────────────────────────────────────────
@@ -139,7 +140,6 @@ client.once('ready', async () => {
                 .setDescription('Instantly deletes the ticket in 3 seconds flat.')
         ].map(cmd => cmd.toJSON());
 
-        // 🎯 REPLACE 'YOUR_SERVER_ID_HERE' with your actual Discord Server ID numbers!
         const GUILD_ID = 'YOUR_SERVER_ID_HERE'; 
 
         await rest.put(
@@ -151,7 +151,6 @@ client.once('ready', async () => {
         console.error('Failed deploying slash commands:', e);
     }
 });
-
 
 // ────────────────────────────────────────────────────────
 // CORE SLASH COMMANDS DISPATCHER
@@ -193,7 +192,6 @@ client.on('interactionCreate', async (interaction) => {
         return interaction.reply({ content: '✅ Master support panel sent successfully.', ephemeral: true });
     }
 
-    // Isolate ticket action commands to verified dynamic channels
     const activeTicket = ticketData.channels[channelId];
     if (!activeTicket) {
         return interaction.reply({ content: '❌ This command can only be used inside an active ticket channel.', ephemeral: true });
@@ -284,7 +282,7 @@ client.on('interactionCreate', async (interaction) => {
 
         const createdChannel = await guild.channels.create({
             name: `${config.channelPrefix}${currentCount}`,
-            type: 0, // Text Channel
+            type: 0, 
             permissionOverwrites: [
                 { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
                 { id: user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
@@ -331,7 +329,6 @@ client.on('interactionCreate', async (interaction) => {
         ticket.claimerId = user.id;
         saveJSON('./tickets.json', ticketData);
 
-        // Lock channel down to ONLY the owner, the claimer, and any manually added users
         await channel.permissionOverwrites.set([
             { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
             { id: ticket.ownerId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
@@ -353,7 +350,7 @@ client.on('interactionCreate', async (interaction) => {
         return;
     }
 
-    // C. INITIAL CLOSE PROCESSING GATEWAY
+    // C. INITIAL CLOSE PROCESSING GATEWAY (HARDENED TWO-PARTY SYSTEM)
     if (customId === 'action_close') {
         const ticket = ticketData.channels[channel.id];
         if (!ticket) return interaction.reply({ content: '❌ Context missing.', ephemeral: true });
@@ -367,7 +364,7 @@ client.on('interactionCreate', async (interaction) => {
             return executeTicketTeardown(channel, ticket);
         }
 
-        // Claimed close authorization loop
+        // Claimed close authorization check
         if (user.id !== ticket.ownerId && user.id !== ticket.claimerId) {
             return interaction.reply({ content: '❌ Only the ticket creator or the assigned assister can close this thread.', ephemeral: true });
         }
@@ -376,38 +373,50 @@ client.on('interactionCreate', async (interaction) => {
 
         const validationEmbed = new EmbedBuilder()
             .setColor('#FEE75C')
-            .setDescription(`## 🚨 Ticket Confirmation\n\n<@${oppositePingId}> Are you sure you would like to close this ticket?`);
+            .setDescription(`## 🚨 Ticket Confirmation\n\n<@${oppositePingId}>, please confirm if you would like to accept or decline closing this ticket.\n\n_*Note: Requested by <@${user.id}>_*`);
 
+        // We bind the user who requested the close right into the customIds
         const confirmationRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('confirm_close_yes').setLabel('Confirm').setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId('confirm_close_no').setLabel('Deny').setStyle(ButtonStyle.Danger)
+            new ButtonBuilder().setCustomId(`confirm_close_yes_${user.id}`).setLabel('Confirm').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId(`confirm_close_no_${user.id}`).setLabel('Deny').setStyle(ButtonStyle.Danger)
         );
 
         return interaction.reply({ embeds: [validationEmbed], components: [confirmationRow] });
     }
 
-    // D. CONFIRMATION PROMPT VALIDATORS
-    if (customId === 'confirm_close_yes') {
+    // D. HARDENED CONFIRMATION PROMPT VALIDATORS
+    if (customId.startsWith('confirm_close_yes_') || customId.startsWith('confirm_close_no_')) {
         const ticket = ticketData.channels[channel.id];
         if (!ticket) return interaction.reply({ content: '❌ Structural metadata reference lost.', ephemeral: true });
 
-        if (user.id !== ticket.ownerId && user.id !== ticket.claimerId) {
-            return interaction.reply({ content: '❌ Execution rejected.', ephemeral: true });
+        // Parse who initiated the close command from the customId metadata string
+        const customIdParts = customId.split('_');
+        const initiatorId = customIdParts[3];
+
+        // CRITICAL ANTI-SELF-APPROVE LOCK:
+        if (user.id === initiatorId) {
+            return interaction.reply({ 
+                content: '⚠️ **Action Denied:** You cannot accept or deny your own close request! The other party must interact with this panel.', 
+                ephemeral: true 
+            });
         }
 
-        await interaction.deferReply();
-        return executeTicketTeardown(channel, ticket);
-    }
-
-    if (customId === 'confirm_close_no') {
-        const ticket = ticketData.channels[channel.id];
-        if (!ticket) return interaction.reply({ content: '❌ Mismatch data framework context.', ephemeral: true });
-
+        // Ensure that random outsiders cannot click it either
         if (user.id !== ticket.ownerId && user.id !== ticket.claimerId) {
-            return interaction.reply({ content: '❌ Execution rejected.', ephemeral: true });
+            return interaction.reply({ content: '❌ You are not authorized to decide this ticket\'s lifecycle.', ephemeral: true });
         }
 
-        return interaction.message.delete().catch(() => {});
+        // Handle Approved Closure
+        if (customId.startsWith('confirm_close_yes_')) {
+            await interaction.reply({ content: '🔒 **Ticket verification complete.** Generating transcripts and wiping area...' });
+            return executeTicketTeardown(channel, ticket);
+        }
+
+        // Handle Denied Closure
+        if (customId.startsWith('confirm_close_no_')) {
+            await interaction.message.delete().catch(() => {});
+            return interaction.reply({ content: `❌ <@${user.id}> has declined the ticket closure. Ticket remains active.` });
+        }
     }
 });
 
