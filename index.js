@@ -1,4 +1,4 @@
-pconst { 
+const { 
     Client, 
     GatewayIntentBits, 
     Partials, 
@@ -91,7 +91,7 @@ const ticketTypes = {
     }
 };
 
-// 📦 PERSISTENCE ENGINE ENGINE (Local File Database)
+// 📦 PERSISTENCE ENGINE (Local File Database)
 const writeQueues = {};
 function loadJSON(file, defaultData = {}) {
     try {
@@ -140,7 +140,7 @@ client.once('ready', async () => {
                 .setDescription('Instantly deletes the ticket in 3 seconds flat.')
         ].map(cmd => cmd.toJSON());
 
-        const GUILD_ID = 'YOUR_SERVER_ID_HERE'; 
+        const GUILD_ID = '1506139326579216415'; 
 
         await rest.put(
             Routes.applicationGuildCommands(client.user.id, GUILD_ID), 
@@ -160,7 +160,6 @@ client.on('interactionCreate', async (interaction) => {
 
     const { commandName, channelId, user, guild } = interaction;
 
-    // 1. SET_PANEL COMMAND
     if (commandName === 'set_panel') {
         if (!interaction.member.roles.cache.has(SET_PANEL_ROLE_ID)) {
             return interaction.reply({ content: '❌ You do not have the required role to use this command.', ephemeral: true });
@@ -197,7 +196,6 @@ client.on('interactionCreate', async (interaction) => {
         return interaction.reply({ content: '❌ This command can only be used inside an active ticket channel.', ephemeral: true });
     }
 
-    // 2. ADD COMMAND
     if (commandName === 'add') {
         if (activeTicket.claimerId !== user.id) {
             return interaction.reply({ content: '❌ Only the staff member who claimed this ticket can use this command.', ephemeral: true });
@@ -226,7 +224,6 @@ client.on('interactionCreate', async (interaction) => {
         return interaction.reply({ embeds: [addEmbed] });
     }
 
-    // 3. REMOVE COMMAND
     if (commandName === 'remove') {
         if (activeTicket.claimerId !== user.id) {
             return interaction.reply({ content: '❌ Only the staff member who claimed this ticket can use this command.', ephemeral: true });
@@ -249,7 +246,6 @@ client.on('interactionCreate', async (interaction) => {
         return interaction.reply({ embeds: [removeEmbed] });
     }
 
-    // 4. FORCE_CLOSE COMMAND
     if (commandName === 'force_close') {
         if (activeTicket.claimerId !== user.id) {
             return interaction.reply({ content: '❌ Only the staff member who claimed this ticket can use this command.', ephemeral: true });
@@ -270,7 +266,6 @@ client.on('interactionCreate', async (interaction) => {
 
     const { customId, guild, user, channel } = interaction;
 
-    // A. PANEL SPARK SELECTION INTERCEPTOR
     const typeKey = Object.keys(ticketTypes).find(key => ticketTypes[key].customId === customId);
     if (typeKey) {
         await interaction.deferReply({ ephemeral: true });
@@ -317,7 +312,6 @@ client.on('interactionCreate', async (interaction) => {
         return interaction.editReply({ content: `✅ Ticket opened successfully! Head to <#${createdChannel.id}>.` });
     }
 
-    // B. CLAIM BUTTON INTERACTION
     if (customId === 'action_claim') {
         const ticket = ticketData.channels[channel.id];
         if (!ticket) return interaction.reply({ content: '❌ State mismatch: Context entry unavailable.', ephemeral: true });
@@ -350,12 +344,10 @@ client.on('interactionCreate', async (interaction) => {
         return;
     }
 
-    // C. INITIAL CLOSE PROCESSING GATEWAY (HARDENED TWO-PARTY SYSTEM)
     if (customId === 'action_close') {
         const ticket = ticketData.channels[channel.id];
         if (!ticket) return interaction.reply({ content: '❌ Context missing.', ephemeral: true });
 
-        // Unclaimed close condition bypass
         if (!ticket.claimerId) {
             if (user.id !== ticket.ownerId) {
                 return interaction.reply({ content: '❌ Only the ticket creator can close an unclaimed ticket.', ephemeral: true });
@@ -364,7 +356,6 @@ client.on('interactionCreate', async (interaction) => {
             return executeTicketTeardown(channel, ticket);
         }
 
-        // Claimed close authorization check
         if (user.id !== ticket.ownerId && user.id !== ticket.claimerId) {
             return interaction.reply({ content: '❌ Only the ticket creator or the assigned assister can close this thread.', ephemeral: true });
         }
@@ -375,7 +366,6 @@ client.on('interactionCreate', async (interaction) => {
             .setColor('#FEE75C')
             .setDescription(`## 🚨 Ticket Confirmation\n\n<@${oppositePingId}>, please confirm if you would like to accept or decline closing this ticket.\n\n_*Note: Requested by <@${user.id}>_*`);
 
-        // We bind the user who requested the close right into the customIds
         const confirmationRow = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId(`confirm_close_yes_${user.id}`).setLabel('Confirm').setStyle(ButtonStyle.Success),
             new ButtonBuilder().setCustomId(`confirm_close_no_${user.id}`).setLabel('Deny').setStyle(ButtonStyle.Danger)
@@ -384,16 +374,13 @@ client.on('interactionCreate', async (interaction) => {
         return interaction.reply({ embeds: [validationEmbed], components: [confirmationRow] });
     }
 
-    // D. HARDENED CONFIRMATION PROMPT VALIDATORS
     if (customId.startsWith('confirm_close_yes_') || customId.startsWith('confirm_close_no_')) {
         const ticket = ticketData.channels[channel.id];
         if (!ticket) return interaction.reply({ content: '❌ Structural metadata reference lost.', ephemeral: true });
 
-        // Parse who initiated the close command from the customId metadata string
         const customIdParts = customId.split('_');
         const initiatorId = customIdParts[3];
 
-        // CRITICAL ANTI-SELF-APPROVE LOCK:
         if (user.id === initiatorId) {
             return interaction.reply({ 
                 content: '⚠️ **Action Denied:** You cannot accept or deny your own close request! The other party must interact with this panel.', 
@@ -401,18 +388,15 @@ client.on('interactionCreate', async (interaction) => {
             });
         }
 
-        // Ensure that random outsiders cannot click it either
         if (user.id !== ticket.ownerId && user.id !== ticket.claimerId) {
             return interaction.reply({ content: '❌ You are not authorized to decide this ticket\'s lifecycle.', ephemeral: true });
         }
 
-        // Handle Approved Closure
         if (customId.startsWith('confirm_close_yes_')) {
             await interaction.reply({ content: '🔒 **Ticket verification complete.** Generating transcripts and wiping area...' });
             return executeTicketTeardown(channel, ticket);
         }
 
-        // Handle Denied Closure
         if (customId.startsWith('confirm_close_no_')) {
             await interaction.message.delete().catch(() => {});
             return interaction.reply({ content: `❌ <@${user.id}> has declined the ticket closure. Ticket remains active.` });
